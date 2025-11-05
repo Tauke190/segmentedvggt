@@ -86,7 +86,8 @@ def get_dataloaders(shuffle=True):
 def train():
     vggt_model = load_frozen_vggt()
     train_loader = get_dataloaders()
-    seg_head = LinearSegmentationHead(in_channels=2048, num_classes=NUM_CLASSES).to(DEVICE)
+    # Use the correct feature dimension: 8192
+    seg_head = LinearSegmentationHead(in_channels=8192, num_classes=NUM_CLASSES).to(DEVICE)
     optimizer = optim.Adam(seg_head.parameters(), lr=LEARNING_RATE)
     criterion = nn.CrossEntropyLoss(ignore_index=255)
 
@@ -102,8 +103,8 @@ def train():
             with torch.no_grad():
                 # Add a sequence dimension: [B, C, H, W] -> [B, 1, C, H, W]
                 features_list, _ = vggt_model.aggregator(images.unsqueeze(1))
-                # Squeeze the sequence dimension from output: [B, 1, N, D] -> [B, N, D]
-                last_features = features_list[-1].squeeze(1)
+                # Use the second-to-last features (dim 8192) and squeeze the sequence dimension
+                last_features = features_list[-2].squeeze(1)
             
             # Reshape from [B, N, D] to [B, D, H, W]
             # B: Batch size, N: Num patches, D: Embedding dim
@@ -129,7 +130,8 @@ def train():
 def visualize_predictions():
     print("\nVisualizing segmentation results...")
     vggt_model = load_frozen_vggt()
-    seg_head = LinearSegmentationHead(in_channels=2048, num_classes=NUM_CLASSES).to(DEVICE)
+    # Use the correct feature dimension: 8192
+    seg_head = LinearSegmentationHead(in_channels=8192, num_classes=NUM_CLASSES).to(DEVICE)
     seg_head.load_state_dict(torch.load("segmentation_head.pt"))
     seg_head.eval()
 
@@ -143,8 +145,8 @@ def visualize_predictions():
     with torch.no_grad():
         # Add a sequence dimension: [B, C, H, W] -> [B, 1, C, H, W]
         features_list, _ = vggt_model.aggregator(images.unsqueeze(1))
-        # Squeeze the sequence dimension from output: [B, 1, N, D] -> [B, N, D]
-        last_features = features_list[-1].squeeze(1)
+        # Use the second-to-last features (dim 8192) and squeeze the sequence dimension
+        last_features = features_list[-2].squeeze(1)
         
         # Reshape from [B, N, D] to [B, D, H, W]
         B, _, D = last_features.shape
