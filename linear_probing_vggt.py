@@ -65,10 +65,15 @@ def get_dataloaders(shuffle=True):
     ])
 
     def transform(batch):
-        # Apply transforms to a batch of images and masks
         images = [image_transforms(img.convert("RGB")) for img in batch["image"]]
-        # Use 'mask' for this dataset split
-        masks = [mask_transforms(m.convert("P")).squeeze(0) for m in batch["mask"]]
+        masks = []
+        for m in batch["mask"]:
+            mm = mask_transforms(m.convert("P")).squeeze(0)  # long, shape HxW
+            # Keep 255 as ignore; clamp any other out-of-range ids to ignore (255)
+            invalid = (mm != 255) & ((mm < 0) | (mm >= NUM_CLASSES))
+            if invalid.any():
+                mm[invalid] = 255
+            masks.append(mm)
         return {"pixel_values": images, "label": masks}
 
     # Load the validation split from the nateraw/pascal-voc-2012 dataset
@@ -99,6 +104,10 @@ def train():
         # The dataloader now returns a dictionary, so we unpack it
         for batch in tqdm(train_loader, desc=f"Epoch {epoch+1}/{NUM_EPOCHS}"):
             images, masks = batch['pixel_values'].to(DEVICE), batch['label'].to(DEVICE)
+            # Sanity check
+            bad = (masks != 255) & ((masks < 0) | (masks >= NUM_CLASSES))
+            if bad.any():
+                raise ValueError(f"Found invalid labels in mask: {masks.unique().tolist()}")
             with torch.no_grad():
                 # Add a sequence dimension: [B, C, H, W] -> [B, 1, C, H, W]
                 features_list, _ = vggt_model.aggregator(images.unsqueeze(1))
