@@ -19,8 +19,15 @@ NUM_CLASSES = 21  # 20 classes + 1 background for Pascal VOC
 INPUT_SIZE = (770, 518)
 PATCH_SIZE = 14
 LEARNING_RATE = 1e-3
-BATCH_SIZE = 4 # Reduce if you get out-of-memory errors
+BATCH_SIZE = 1  # reduce to avoid OOM
 NUM_EPOCHS = 10
+
+# Optional: allow TF32 on Ampere+ (perf win, same memory)
+if torch.cuda.is_available():
+    torch.backends.cuda.matmul.allow_tf32 = True
+
+# Choose AMP dtype (bf16 on Ampere+, else fp16)
+AMP_DTYPE = torch.bfloat16 if (torch.cuda.is_available() and torch.cuda.get_device_capability(0)[0] >= 8) else torch.float16
 
 # --- 1. Define the Segmentation Head ---
 class LinearSegmentationHead(nn.Module):
@@ -101,38 +108,33 @@ def train():
     for epoch in range(NUM_EPOCHS):
         seg_head.train()
         total_loss = 0
-        # The dataloader now returns a dictionary, so we unpack it
         for batch in tqdm(train_loader, desc=f"Epoch {epoch+1}/{NUM_EPOCHS}"):
             images, masks = batch['pixel_values'].to(DEVICE), batch['label'].to(DEVICE)
-            # Sanity check
             bad = (masks != 255) & ((masks < 0) | (masks >= NUM_CLASSES))
             if bad.any():
                 raise ValueError(f"Found invalid labels in mask: {masks.unique().tolist()}")
-            with torch.no_grad():
-                # Add a sequence dimension: [B, C, H, W] -> [B, 1, C, H, W]
+
+            # Inference-only backbone with AMP to cut memory
+            with torch.inference_mode(), torch.cuda.amp.autocast(device_type="cuda", dtype=AMP_DTYPE):
                 features_list, _ = vggt_model.aggregator(images.unsqueeze(1))
-                # Use the second-to-last features (dim 8192) and squeeze the sequence dimension
                 last_features = features_list[-2].squeeze(1)
-            
-            # Reshape from [B, N, D] to [B, D, H, W]
-            # B: Batch size, N: Num patches, D: Embedding dim
-            # H: Feature height, W: Feature width
+            del features_list  # free memory ASAP
+
             B, _, D = last_features.shape
-            # The model outputs more tokens than patches (e.g., 2040 vs 2035).
-            # We slice the tensor to keep only the patch tokens for reshaping.
             num_patches = feature_h * feature_w
             patch_features = last_features[:, -num_patches:, :]
-
             features_2d = patch_features.permute(0, 2, 1).reshape(B, D, feature_h, feature_w)
-            
+
+            # Train head in fp32 for stability
+            features_2d = features_2d.float()
             outputs = seg_head(features_2d)
             loss = criterion(outputs, masks)
-            
+
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
-            
+
         print(f"Epoch {epoch+1} Average Loss: {total_loss / len(train_loader):.4f}")
 
     print("\nTraining finished.")
@@ -143,35 +145,28 @@ def train():
 def visualize_predictions():
     print("\nVisualizing segmentation results...")
     vggt_model = load_frozen_vggt()
-    # Use the correct feature dimension: 2048
     seg_head = LinearSegmentationHead(in_channels=2048, num_classes=NUM_CLASSES).to(DEVICE)
-    seg_head.load_state_dict(torch.load("segmentation_head.pt"))
+    seg_head.load_state_dict(torch.load("segmentation_head.pt", map_location=DEVICE))
     seg_head.eval()
 
     val_loader = get_dataloaders(shuffle=False)
-    # The dataloader now returns a dictionary, so we unpack it
     batch = next(iter(val_loader))
     images, masks = batch['pixel_values'].to(DEVICE), batch['label'].to(DEVICE)
 
     feature_h, feature_w = INPUT_SIZE[0] // PATCH_SIZE, INPUT_SIZE[1] // PATCH_SIZE
 
-    with torch.no_grad():
-        # Add a sequence dimension: [B, C, H, W] -> [B, 1, C, H, W]
+    with torch.inference_mode(), torch.cuda.amp.autocast(device_type="cuda", dtype=AMP_DTYPE):
         features_list, _ = vggt_model.aggregator(images.unsqueeze(1))
-        # Use the second-to-last features (dim 8192) and squeeze the sequence dimension
         last_features = features_list[-2].squeeze(1)
-        
-        # Reshape from [B, N, D] to [B, D, H, W]
-        B, _, D = last_features.shape
-        # The model outputs more tokens than patches (e.g., 2040 vs 2035).
-        # We slice the tensor to keep only the patch tokens for reshaping.
-        num_patches = feature_h * feature_w
-        patch_features = last_features[:, -num_patches:, :]
+    del features_list
 
-        features_2d = patch_features.permute(0, 2, 1).reshape(B, D, feature_h, feature_w)
-        
-        outputs = seg_head(features_2d)
-        preds = torch.argmax(outputs, dim=1)
+    B, _, D = last_features.shape
+    num_patches = feature_h * feature_w
+    patch_features = last_features[:, -num_patches:, :]
+    features_2d = patch_features.permute(0, 2, 1).reshape(B, D, feature_h, feature_w)
+
+    outputs = seg_head(features_2d.float())
+    preds = torch.argmax(outputs, dim=1)
 
     # Move data to CPU for plotting
     images, masks, preds = images.cpu(), masks.cpu(), preds.cpu()
