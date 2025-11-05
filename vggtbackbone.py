@@ -20,6 +20,9 @@ def extract_backbone_features(image_folder, device="cuda"):
     images = load_and_preprocess_images(image_paths).to(device)
     print(f"Loaded {len(image_paths)} images. Shape: {images.shape}")
 
+    # Add a batch dimension to make the tensor 5D: (S, C, H, W) -> (1, S, C, H, W)
+    images = images.unsqueeze(0)
+
     # Extract backbone features using the aggregator
     with torch.no_grad():
         backbone_features, patch_start_idx = model.aggregator(images)
