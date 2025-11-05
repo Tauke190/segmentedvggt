@@ -20,9 +20,9 @@ def extract_backbone_features(image_folder, device="cuda"):
     images = load_and_preprocess_images(image_paths).to(device)
     print(f"Loaded {len(image_paths)} images. Shape: {images.shape}")
 
-    # Extract backbone features
+    # Extract backbone features using the aggregator
     with torch.no_grad():
-        backbone_features = model.backbone(images)
+        backbone_features, patch_start_idx = model.aggregator(images)
     print(f"Backbone features shape: {backbone_features.shape}")
     return backbone_features
 
@@ -35,5 +35,5 @@ if __name__ == "__main__":
 
     features = extract_backbone_features(args.image_folder, device=args.device)
     # Optionally, save features to disk
-    # torch.save(features.cpu(), "backbone_features.pt")
+    torch.save(features.cpu(), "backbone_features.pt")
     print("Backbone features saved to backbone_features.pt")
