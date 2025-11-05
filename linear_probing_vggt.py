@@ -86,8 +86,7 @@ def get_dataloaders(shuffle=True):
 def train():
     vggt_model = load_frozen_vggt()
     train_loader = get_dataloaders()
-    # Use the correct feature dimension: 8192
-    seg_head = LinearSegmentationHead(in_channels=8192, num_classes=NUM_CLASSES).to(DEVICE)
+    seg_head = LinearSegmentationHead(in_channels=2048, num_classes=NUM_CLASSES).to(DEVICE)
     optimizer = optim.Adam(seg_head.parameters(), lr=LEARNING_RATE)
     criterion = nn.CrossEntropyLoss(ignore_index=255)
 
@@ -110,7 +109,12 @@ def train():
             # B: Batch size, N: Num patches, D: Embedding dim
             # H: Feature height, W: Feature width
             B, _, D = last_features.shape
-            features_2d = last_features.permute(0, 2, 1).reshape(B, D, feature_h, feature_w)
+            # The model outputs more tokens than patches (e.g., 2040 vs 2035).
+            # We slice the tensor to keep only the patch tokens for reshaping.
+            num_patches = feature_h * feature_w
+            patch_features = last_features[:, -num_patches:, :]
+
+            features_2d = patch_features.permute(0, 2, 1).reshape(B, D, feature_h, feature_w)
             
             outputs = seg_head(features_2d)
             loss = criterion(outputs, masks)
@@ -130,8 +134,8 @@ def train():
 def visualize_predictions():
     print("\nVisualizing segmentation results...")
     vggt_model = load_frozen_vggt()
-    # Use the correct feature dimension: 8192
-    seg_head = LinearSegmentationHead(in_channels=8192, num_classes=NUM_CLASSES).to(DEVICE)
+    # Use the correct feature dimension: 2048
+    seg_head = LinearSegmentationHead(in_channels=2048, num_classes=NUM_CLASSES).to(DEVICE)
     seg_head.load_state_dict(torch.load("segmentation_head.pt"))
     seg_head.eval()
 
@@ -150,7 +154,12 @@ def visualize_predictions():
         
         # Reshape from [B, N, D] to [B, D, H, W]
         B, _, D = last_features.shape
-        features_2d = last_features.permute(0, 2, 1).reshape(B, D, feature_h, feature_w)
+        # The model outputs more tokens than patches (e.g., 2040 vs 2035).
+        # We slice the tensor to keep only the patch tokens for reshaping.
+        num_patches = feature_h * feature_w
+        patch_features = last_features[:, -num_patches:, :]
+
+        features_2d = patch_features.permute(0, 2, 1).reshape(B, D, feature_h, feature_w)
         
         outputs = seg_head(features_2d)
         preds = torch.argmax(outputs, dim=1)
