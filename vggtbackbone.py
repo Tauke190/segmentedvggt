@@ -13,13 +13,15 @@ def extract_backbone_features(image_folder, device="cuda"):
     _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
     model.load_state_dict(torch.hub.load_state_dict_from_url(_URL))
     model.eval()
-    model = model.to(device)
+    # Convert model to half-precision BEFORE moving to GPU
+    model = model.half().to(device)
 
     # Load and preprocess images
     image_paths = sorted(glob.glob(os.path.join(image_folder, "*")))
     if not image_paths:
         raise ValueError(f"No images found in {image_folder}")
-    images = load_and_preprocess_images(image_paths).to(device)
+    # Convert images to half-precision to match the model
+    images = load_and_preprocess_images(image_paths).to(device, dtype=torch.float16)
     print(f"Loaded {len(image_paths)} images. Shape: {images.shape}")
 
     # Add a batch dimension to make the tensor 5D: (S, C, H, W) -> (1, S, C, H, W)
