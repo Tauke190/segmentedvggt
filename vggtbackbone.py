@@ -1,6 +1,8 @@
 import os
 import glob
 import torch
+import numpy as np
+import matplotlib.pyplot as plt
 from vggt.models.vggt import VGGT
 from vggt.utils.load_fn import load_and_preprocess_images
 
@@ -32,6 +34,33 @@ def extract_backbone_features(image_folder, device="cuda"):
     for i, tensor in enumerate(backbone_features):
         print(f"  - Tensor at index {i} has shape: {tensor.shape}")
     print("--------------------------------------------------------\n")
+
+    # --- Visualization of the final layer feature norm ---
+    # 1. Get the final layer's features (last tensor in the list)
+    final_features = backbone_features[-1].cpu() # Shape: (1, Num_Patches, Feature_Dim)
+
+    # 2. Calculate the L2 norm across the feature dimension
+    # This gives a magnitude for each patch's feature vector.
+    feature_norm = torch.linalg.norm(final_features, dim=-1).squeeze(0) # Shape: (Num_Patches,)
+
+    # 3. Reshape into a 2D grid for visualization
+    # We calculate the grid size (H, W) from the total number of patches.
+    num_patches = feature_norm.shape[0]
+    grid_size = int(np.sqrt(num_patches))
+    if grid_size * grid_size != num_patches:
+        print("Warning: Cannot form a perfect square grid for visualization.")
+    else:
+        feature_norm_grid = feature_norm.reshape(grid_size, grid_size)
+
+        # 4. Plot the heatmap
+        plt.figure(figsize=(8, 8))
+        plt.imshow(feature_norm_grid, cmap='viridis')
+        plt.colorbar(label="Feature L2 Norm")
+        plt.title("Feature Norm of Final Layer")
+        plt.axis('off')
+        plt.savefig("feature_norm_heatmap.png")
+        print("Feature norm heatmap saved to feature_norm_heatmap.png")
+        # plt.show() # Uncomment to display the plot directly
 
     return backbone_features
 
