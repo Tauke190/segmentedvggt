@@ -26,7 +26,13 @@ def extract_backbone_features(image_folder, device="cuda"):
     # Extract backbone features using the aggregator
     with torch.no_grad():
         backbone_features, patch_start_idx = model.aggregator(images)
-    print(f"Backbone features shape: {backbone_features.shape}")
+    
+    # Inspect the tensors inside the backbone_features list
+    print(f"\n--- Inspecting backbone_features (list of {len(backbone_features)} tensors) ---")
+    for i, tensor in enumerate(backbone_features):
+        print(f"  - Tensor at index {i} has shape: {tensor.shape}")
+    print("--------------------------------------------------------\n")
+
     return backbone_features
 
 if __name__ == "__main__":
@@ -37,6 +43,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     features = extract_backbone_features(args.image_folder, device=args.device)
-    # Optionally, save features to disk
-    torch.save(features.cpu(), "backbone_features.pt")
-    print("Backbone features saved to backbone_features.pt")
+    # Optionally, save features to disk. This saves the entire list of tensors.
+    features_to_save = [t.cpu() for t in features]
+    torch.save(features_to_save, "backbone_features.pt")
+    print("Backbone features (list of tensors) saved to backbone_features.pt")
