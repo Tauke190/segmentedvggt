@@ -44,23 +44,26 @@ def extract_backbone_features(image_folder, device="cuda"):
     feature_norm = torch.linalg.norm(final_features, dim=-1).squeeze(0) # Shape: (Num_Patches,)
 
     # 3. Reshape into a 2D grid for visualization
-    # We calculate the grid size (H, W) from the total number of patches.
+    # The number of patches is not always a perfect square.
+    # We find the grid dimensions (H, W) that are closest to a square.
     num_patches = feature_norm.shape[0]
-    grid_size = int(np.sqrt(num_patches))
-    if grid_size * grid_size != num_patches:
-        print("Warning: Cannot form a perfect square grid for visualization.")
-    else:
-        feature_norm_grid = feature_norm.reshape(grid_size, grid_size)
+    h = int(np.sqrt(num_patches))
+    while num_patches % h != 0:
+        h -= 1
+    w = num_patches // h
+    
+    print(f"Reshaping {num_patches} patches into a {h}x{w} grid for visualization.")
+    feature_norm_grid = feature_norm.reshape(h, w)
 
-        # 4. Plot the heatmap
-        plt.figure(figsize=(8, 8))
-        plt.imshow(feature_norm_grid, cmap='viridis')
-        plt.colorbar(label="Feature L2 Norm")
-        plt.title("Feature Norm of Final Layer")
-        plt.axis('off')
-        plt.savefig("feature_norm_heatmap.png")
-        print("Feature norm heatmap saved to feature_norm_heatmap.png")
-        # plt.show() # Uncomment to display the plot directly
+    # 4. Plot the heatmap
+    plt.figure(figsize=(w/h * 8, 8)) # Adjust figure size based on aspect ratio
+    plt.imshow(feature_norm_grid, cmap='viridis', aspect='auto')
+    plt.colorbar(label="Feature L2 Norm")
+    plt.title("Feature Norm of Final Layer")
+    plt.axis('off')
+    plt.savefig("feature_norm_heatmap.png")
+    print("Feature norm heatmap saved to feature_norm_heatmap.png")
+    # plt.show() # Uncomment to display the plot directly
 
     return backbone_features
 
