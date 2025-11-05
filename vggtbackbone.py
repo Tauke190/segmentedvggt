@@ -45,7 +45,7 @@ def extract_backbone_features(image_folder, device="cuda"):
 
     # 2. Calculate the L2 norm across the feature dimension
     # This gives a magnitude for each patch's feature vector.
-    feature_norm = torch.linalg.norm(final_features, dim=-1).squeeze(0) # Shape: (Num_Patches,)
+    feature_norm = torch.linalg.norm(final_features, dim=-1).squeeze() # Shape: (Num_Patches,)
     print(f"2. Shape of feature_norm after norm and squeeze: {feature_norm.shape}")
 
     # 3. Reshape into a 2D grid for visualization
