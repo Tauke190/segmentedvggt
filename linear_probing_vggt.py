@@ -65,22 +65,20 @@ def get_dataloaders(shuffle=True):
     ])
 
     def transform(batch):
+        # Apply transforms to a batch of images and masks
         images = [image_transforms(img.convert("RGB")) for img in batch["image"]]
         masks = [mask_transforms(m.convert("P")).squeeze(0) for m in batch["mask"]]
         return {"pixel_values": images, "label": masks}
 
     # Load the validation split from the merve/pascal-voc dataset
     ds = load_dataset("merve/pascal-voc", split='validation')
-    ds.set_transform(transform)
+    
+    # Use map to apply the transform and create new columns
+    ds = ds.map(transform, batched=True, remove_columns=["image", "mask"])
+    ds.set_format(type='torch') # Set the output format to PyTorch tensors
 
-    # The transform returns a dict, so we need a custom collate function
-    def collate_fn(batch):
-        return (
-            torch.stack([x["pixel_values"] for x in batch]),
-            torch.stack([x["label"] for x in batch]),
-        )
-
-    dataloader = DataLoader(ds, batch_size=BATCH_SIZE, shuffle=shuffle, num_workers=2, collate_fn=collate_fn)
+    # The collate function is no longer needed as the dataset now returns tensors directly
+    dataloader = DataLoader(ds, batch_size=BATCH_SIZE, shuffle=shuffle, num_workers=2)
     return dataloader
 
 # --- 4. Training Loop ---
@@ -97,8 +95,9 @@ def train():
     for epoch in range(NUM_EPOCHS):
         seg_head.train()
         total_loss = 0
-        for images, masks in tqdm(train_loader, desc=f"Epoch {epoch+1}/{NUM_EPOCHS}"):
-            images, masks = images.to(DEVICE), masks.to(DEVICE)
+        # The dataloader now returns a dictionary, so we unpack it
+        for batch in tqdm(train_loader, desc=f"Epoch {epoch+1}/{NUM_EPOCHS}"):
+            images, masks = batch['pixel_values'].to(DEVICE), batch['label'].to(DEVICE)
             with torch.no_grad():
                 features_list, _ = vggt_model.aggregator(images.unsqueeze(0))
                 last_features = features_list[-1]
@@ -129,8 +128,9 @@ def visualize_predictions():
     seg_head.eval()
 
     val_loader = get_dataloaders(shuffle=False)
-    images, masks = next(iter(val_loader))
-    images, masks = images.to(DEVICE), masks.to(DEVICE)
+    # The dataloader now returns a dictionary, so we unpack it
+    batch = next(iter(val_loader))
+    images, masks = batch['pixel_values'].to(DEVICE), batch['label'].to(DEVICE)
 
     feature_h, feature_w = INPUT_SIZE[0] // PATCH_SIZE, INPUT_SIZE[1] // PATCH_SIZE
 
