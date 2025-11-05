@@ -115,7 +115,7 @@ def train():
                 raise ValueError(f"Found invalid labels in mask: {masks.unique().tolist()}")
 
             # Inference-only backbone with AMP to cut memory
-            with torch.inference_mode(), torch.cuda.amp.autocast(device_type="cuda", dtype=AMP_DTYPE):
+            with torch.inference_mode(), torch.autocast("cuda", dtype=AMP_DTYPE):
                 features_list, _ = vggt_model.aggregator(images.unsqueeze(1))
                 last_features = features_list[-2].squeeze(1)
             del features_list  # free memory ASAP
@@ -155,7 +155,7 @@ def visualize_predictions():
 
     feature_h, feature_w = INPUT_SIZE[0] // PATCH_SIZE, INPUT_SIZE[1] // PATCH_SIZE
 
-    with torch.inference_mode(), torch.cuda.amp.autocast(device_type="cuda", dtype=AMP_DTYPE):
+    with torch.inference_mode(), torch.autocast("cuda", dtype=AMP_DTYPE):
         features_list, _ = vggt_model.aggregator(images.unsqueeze(1))
         last_features = features_list[-2].squeeze(1)
     del features_list
