@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from torchvision.datasets import VOCSegmentation
+from datasets import load_dataset
 import torchvision.transforms.v2 as T
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -51,7 +51,7 @@ def load_frozen_vggt():
 
 # --- 3. Prepare the Dataset ---
 def get_dataloaders(shuffle=True):
-    print("Preparing Pascal VOC 2012 dataset...")
+    print("Preparing Pascal VOC 2012 dataset from Hugging Face...")
     image_transforms = T.Compose([
         T.Resize(INPUT_SIZE),
         T.ToImage(),
@@ -64,11 +64,23 @@ def get_dataloaders(shuffle=True):
         T.ToDtype(torch.long, scale=False)
     ])
 
-    def transform(image, mask):
-        return image_transforms(image), mask_transforms(mask).squeeze(0)
+    def transform(batch):
+        images = [image_transforms(img.convert("RGB")) for img in batch["image"]]
+        masks = [mask_transforms(m.convert("P")).squeeze(0) for m in batch["mask"]]
+        return {"pixel_values": images, "label": masks}
 
-    dataset = VOCSegmentation(root='./data', year='2012', image_set='val', download=True, transforms=transform)
-    dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=shuffle, num_workers=2)
+    # Load the validation split from the merve/pascal-voc dataset
+    ds = load_dataset("merve/pascal-voc", "voc2012", split='validation')
+    ds.set_transform(transform)
+
+    # The transform returns a dict, so we need a custom collate function
+    def collate_fn(batch):
+        return (
+            torch.stack([x["pixel_values"] for x in batch]),
+            torch.stack([x["label"] for x in batch]),
+        )
+
+    dataloader = DataLoader(ds, batch_size=BATCH_SIZE, shuffle=shuffle, num_workers=2, collate_fn=collate_fn)
     return dataloader
 
 # --- 4. Training Loop ---
