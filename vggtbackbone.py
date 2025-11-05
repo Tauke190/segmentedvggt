@@ -65,7 +65,7 @@ def extract_backbone_features(image_folder, device="cuda"):
     print("Feature norm heatmap saved to feature_norm_heatmap.png")
     # plt.show() # Uncomment to display the plot directly
 
-    return backbone_features
+    # return backbone_features # No longer returning features
 
 if __name__ == "__main__":
     import argparse
@@ -74,8 +74,5 @@ if __name__ == "__main__":
     parser.add_argument("--device", type=str, default="cuda", help="Device to use (cuda or cpu)")
     args = parser.parse_args()
 
-    features = extract_backbone_features(args.image_folder, device=args.device)
-    # Optionally, save features to disk. This saves the entire list of tensors.
-    features_to_save = [t.cpu() for t in features]
-    torch.save(features_to_save, "backbone_features.pt")
-    print("Backbone features (list of tensors) saved to backbone_features.pt")
+    extract_backbone_features(args.image_folder, device=args.device)
+    # The following lines for saving features have been removed.
