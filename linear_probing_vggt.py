@@ -29,6 +29,8 @@ if torch.cuda.is_available():
 # Choose AMP dtype (bf16 on Ampere+, else fp16)
 AMP_DTYPE = torch.bfloat16 if (torch.cuda.is_available() and torch.cuda.get_device_capability(0)[0] >= 8) else torch.float16
 
+USE_AMP = False  # disable temporarily to debug NaNs
+
 # --- 1. Define the Segmentation Head ---
 class LinearSegmentationHead(nn.Module):
     """A simple linear head for segmentation."""
@@ -107,35 +109,57 @@ def train():
     print("\nStarting linear probing...")
     for epoch in range(NUM_EPOCHS):
         seg_head.train()
-        total_loss = 0
+        total_loss = 0.0
+        num_batches = 0
         for batch in tqdm(train_loader, desc=f"Epoch {epoch+1}/{NUM_EPOCHS}"):
             images, masks = batch['pixel_values'].to(DEVICE), batch['label'].to(DEVICE)
+
+            # Validate labels
             bad = (masks != 255) & ((masks < 0) | (masks >= NUM_CLASSES))
             if bad.any():
                 raise ValueError(f"Found invalid labels in mask: {masks.unique().tolist()}")
 
-            # Inference-only backbone with AMP to cut memory
-            with torch.no_grad(), torch.autocast("cuda", dtype=AMP_DTYPE):
+            # Skip if no valid pixels
+            valid_count = (masks != 255).sum().item()
+            if valid_count == 0:
+                # No supervision in this batch; skip to avoid NaN from empty reduction
+                continue
+
+            # Frozen backbone forward (optionally AMP)
+            amp_ctx = (torch.autocast("cuda", dtype=AMP_DTYPE) if (USE_AMP and torch.cuda.is_available()) else torch.cuda.amp.autocast(enabled=False))
+            with torch.no_grad(), amp_ctx:
                 features_list, _ = vggt_model.aggregator(images.unsqueeze(1))
                 last_features = features_list[-2].squeeze(1)
-            del features_list  # free memory ASAP
+            del features_list
+
+            # Sanity checks
+            if not torch.isfinite(last_features).all():
+                raise RuntimeError("Backbone features contain NaN/Inf")
 
             B, _, D = last_features.shape
             num_patches = feature_h * feature_w
             patch_features = last_features[:, -num_patches:, :]
-            features_2d = patch_features.permute(0, 2, 1).reshape(B, D, feature_h, feature_w).contiguous()
+            features_2d = patch_features.permute(0, 2, 1).reshape(B, D, feature_h, feature_w).contiguous().float()
 
-            # Train head in fp32 for stability
-            features_2d = features_2d.float()
             outputs = seg_head(features_2d)
-            loss = criterion(outputs, masks)
+            if not torch.isfinite(outputs).all():
+                raise RuntimeError("Seg head outputs contain NaN/Inf")
 
-            optimizer.zero_grad()
+            loss = criterion(outputs, masks)
+            if not torch.isfinite(loss):
+                # Extra debug info
+                raise RuntimeError(f"Loss became {loss.item()} — check logits/masks. "
+                                   f"logits finite: {torch.isfinite(outputs).all().item()}, "
+                                   f"valid_count: {valid_count}")
+
+            optimizer.zero_grad(set_to_none=True)
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
+            num_batches += 1
 
-        print(f"Epoch {epoch+1} Average Loss: {total_loss / len(train_loader):.4f}")
+        avg_loss = (total_loss / max(1, num_batches))
+        print(f"Epoch {epoch+1} Average Loss: {avg_loss:.6f}")
 
     print("\nTraining finished.")
     torch.save(seg_head.state_dict(), "segmentation_head.pt")
