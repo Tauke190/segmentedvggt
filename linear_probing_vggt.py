@@ -67,15 +67,15 @@ def get_dataloaders(shuffle=True):
     def transform(batch):
         # Apply transforms to a batch of images and masks
         images = [image_transforms(img.convert("RGB")) for img in batch["image"]]
-        # Use 'segmentation_mask' for this dataset
-        masks = [mask_transforms(m.convert("P")).squeeze(0) for m in batch["segmentation_mask"]]
+        # Use 'mask' for this dataset split
+        masks = [mask_transforms(m.convert("P")).squeeze(0) for m in batch["mask"]]
         return {"pixel_values": images, "label": masks}
 
     # Load the validation split from the nateraw/pascal-voc-2012 dataset
     ds = load_dataset("nateraw/pascal-voc-2012", split='val')
     
     # Use map to apply the transform and create new columns
-    ds = ds.map(transform, batched=True, remove_columns=["image", "segmentation_mask"])
+    ds = ds.map(transform, batched=True, remove_columns=["image", "mask"])
     ds.set_format(type='torch') # Set the output format to PyTorch tensors
 
     # The collate function is no longer needed as the dataset now returns tensors directly
