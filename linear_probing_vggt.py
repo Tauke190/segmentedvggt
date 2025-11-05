@@ -100,11 +100,16 @@ def train():
         for batch in tqdm(train_loader, desc=f"Epoch {epoch+1}/{NUM_EPOCHS}"):
             images, masks = batch['pixel_values'].to(DEVICE), batch['label'].to(DEVICE)
             with torch.no_grad():
-                features_list, _ = vggt_model.aggregator(images.unsqueeze(0))
-                last_features = features_list[-1]
+                # Add a sequence dimension: [B, C, H, W] -> [B, 1, C, H, W]
+                features_list, _ = vggt_model.aggregator(images.unsqueeze(1))
+                # Squeeze the sequence dimension from output: [B, 1, N, D] -> [B, N, D]
+                last_features = features_list[-1].squeeze(1)
             
-            B, C = last_features.shape[1], last_features.shape[3]
-            features_2d = last_features.squeeze(0).permute(0, 2, 1).reshape(B, C, feature_h, feature_w)
+            # Reshape from [B, N, D] to [B, D, H, W]
+            # B: Batch size, N: Num patches, D: Embedding dim
+            # H: Feature height, W: Feature width
+            B, _, D = last_features.shape
+            features_2d = last_features.permute(0, 2, 1).reshape(B, D, feature_h, feature_w)
             
             outputs = seg_head(features_2d)
             loss = criterion(outputs, masks)
@@ -136,10 +141,15 @@ def visualize_predictions():
     feature_h, feature_w = INPUT_SIZE[0] // PATCH_SIZE, INPUT_SIZE[1] // PATCH_SIZE
 
     with torch.no_grad():
-        features_list, _ = vggt_model.aggregator(images.unsqueeze(0))
-        last_features = features_list[-1]
-        B, C = last_features.shape[1], last_features.shape[3]
-        features_2d = last_features.squeeze(0).permute(0, 2, 1).reshape(B, C, feature_h, feature_w)
+        # Add a sequence dimension: [B, C, H, W] -> [B, 1, C, H, W]
+        features_list, _ = vggt_model.aggregator(images.unsqueeze(1))
+        # Squeeze the sequence dimension from output: [B, 1, N, D] -> [B, N, D]
+        last_features = features_list[-1].squeeze(1)
+        
+        # Reshape from [B, N, D] to [B, D, H, W]
+        B, _, D = last_features.shape
+        features_2d = last_features.permute(0, 2, 1).reshape(B, D, feature_h, feature_w)
+        
         outputs = seg_head(features_2d)
         preds = torch.argmax(outputs, dim=1)
 
