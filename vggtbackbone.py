@@ -39,16 +39,20 @@ def extract_backbone_features(image_folder, device="cuda"):
 
     # --- Visualization of the final layer feature norm ---
     # 1. Get the final layer's features (last tensor in the list)
+    print("\n--- Starting Visualization ---")
     final_features = backbone_features[-1].cpu() # Shape: (1, Num_Patches, Feature_Dim)
+    print(f"1. Shape of final_features tensor: {final_features.shape}")
 
     # 2. Calculate the L2 norm across the feature dimension
     # This gives a magnitude for each patch's feature vector.
     feature_norm = torch.linalg.norm(final_features, dim=-1).squeeze(0) # Shape: (Num_Patches,)
+    print(f"2. Shape of feature_norm after norm and squeeze: {feature_norm.shape}")
 
     # 3. Reshape into a 2D grid for visualization
     # The number of patches is not always a perfect square.
     # We find the grid dimensions (H, W) that are closest to a square.
     num_patches = feature_norm.shape[0]
+    print(f"3. num_patches calculated from feature_norm.shape[0]: {num_patches}")
     
     # --- Robust grid size calculation ---
     def get_grid_dims(n):
@@ -62,10 +66,12 @@ def extract_backbone_features(image_folder, device="cuda"):
         return 1, n # Fallback for prime numbers
         
     h, w = get_grid_dims(num_patches)
+    print(f"4. Grid dimensions calculated: h={h}, w={w}")
     # --- End of new calculation ---
     
-    print(f"Reshaping {num_patches} patches into a {h}x{w} grid for visualization.")
+    print(f"5. Attempting to reshape {num_patches} patches into a {h}x{w} grid.")
     feature_norm_grid = feature_norm.reshape(h, w)
+    print(f"6. Reshape successful. New shape: {feature_norm_grid.shape}")
 
     # 4. Plot the heatmap
     # Adjust figsize to be proportional to the grid dimensions
