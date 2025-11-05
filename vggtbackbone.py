@@ -49,16 +49,29 @@ def extract_backbone_features(image_folder, device="cuda"):
     # The number of patches is not always a perfect square.
     # We find the grid dimensions (H, W) that are closest to a square.
     num_patches = feature_norm.shape[0]
-    h = int(np.sqrt(num_patches))
-    while num_patches % h != 0:
-        h -= 1
-    w = num_patches // h
+    
+    # --- Robust grid size calculation ---
+    def get_grid_dims(n):
+        if n <= 0:
+            return 0, 0
+        h = int(np.sqrt(n))
+        while h > 0:
+            if n % h == 0:
+                return h, n // h
+            h -= 1
+        return 1, n # Fallback for prime numbers
+        
+    h, w = get_grid_dims(num_patches)
+    # --- End of new calculation ---
     
     print(f"Reshaping {num_patches} patches into a {h}x{w} grid for visualization.")
     feature_norm_grid = feature_norm.reshape(h, w)
 
     # 4. Plot the heatmap
-    plt.figure(figsize=(w/h * 8, 8)) # Adjust figure size based on aspect ratio
+    # Adjust figsize to be proportional to the grid dimensions
+    fig_h = 8
+    fig_w = max(4, fig_h * (w / h)) # Ensure a minimum width
+    plt.figure(figsize=(fig_w, fig_h))
     plt.imshow(feature_norm_grid, cmap='viridis', aspect='auto')
     plt.colorbar(label="Feature L2 Norm")
     plt.title("Feature Norm of Final Layer")
