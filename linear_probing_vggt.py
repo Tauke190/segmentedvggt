@@ -70,7 +70,7 @@ def get_dataloaders(shuffle=True):
         return {"pixel_values": images, "label": masks}
 
     # Load the validation split from the merve/pascal-voc dataset
-    ds = load_dataset("merve/pascal-voc", "voc2012", split='validation')
+    ds = load_dataset("merve/pascal-voc", split='validation')
     ds.set_transform(transform)
 
     # The transform returns a dict, so we need a custom collate function
