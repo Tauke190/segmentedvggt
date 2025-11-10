@@ -111,6 +111,7 @@ def viser_wrapper(
 
     from clipseg.multiclass_segmentor import get_multiclass_segmentation_tensor_mask, visualize_tensor
     seg_masks = get_multiclass_segmentation_tensor_mask(prompt, image_folder)
+    visualize_tensor(seg_masks, save_path="clip_seg_masks_viz.png")
 
     # seg_masks = torch.load(r"C:\Users\avina\Desktop\vggt-repo\clipseg\multiclass_segmentation_masks.pt")  # (num_images, H, W)
 
@@ -336,8 +337,8 @@ def viser_wrapper(
 
     # Save the filtered/confident points (same as used for visualization)
     save_mask = (conf_flat >= np.percentile(conf_flat, init_conf_threshold)) & (conf_flat > 0.2)
-    save_point_cloud_as_ply("output_pointcloud_segmented.ply", points_centered[save_mask], colors_with_mask[save_mask])
-    print("Saved segmented 3D point cloud to output_pointcloud_segmented.ply")
+    # save_point_cloud_as_ply("output_pointcloud_segmented.ply", points_centered[save_mask], colors_with_mask[save_mask])
+    # print("Saved segmented 3D point cloud to output_pointcloud_segmented.ply")
 
     print("Starting viser server...")
     # If background_mode is True, spawn a daemon thread so the main thread can continue.

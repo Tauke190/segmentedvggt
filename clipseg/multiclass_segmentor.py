@@ -60,7 +60,7 @@ def get_multiclass_segmentation_tensor_mask(prompts, image_folder, threshold=0.5
 def save_tensor(tensor, filename):
     torch.save(tensor, filename+".pt")
 
-def visualize_tensor(tensor):
+def visualize_tensor(tensor, save_path=None):
     seg_masks_np = tensor.cpu().numpy()  # shape: (N, H, W) or (N, H, W, 1)
     if seg_masks_np.ndim == 4:
         seg_masks_np = seg_masks_np.squeeze(-1)
@@ -85,4 +85,6 @@ def visualize_tensor(tensor):
         ax.axis('off')
 
     plt.tight_layout()
+    if save_path is not None:
+        plt.savefig(save_path)
     plt.show()
