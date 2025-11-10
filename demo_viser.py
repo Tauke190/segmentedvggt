@@ -110,7 +110,7 @@ def viser_wrapper(
 
     S, H, W, _ = depth_map.shape
 
-    from vggt.clipseg.multiclass_segmentor import get_multiclass_segmentation_tensor_mask, visualize_tensor
+    from clipseg.multiclass_segmentor import get_multiclass_segmentation_tensor_mask, visualize_tensor
     seg_masks = get_multiclass_segmentation_tensor_mask(prompt, image_folder)
 
     # seg_masks = torch.load(r"C:\Users\avina\Desktop\vggt-repo\clipseg\multiclass_segmentation_masks.pt")  # (num_images, H, W)
