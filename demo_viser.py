@@ -111,7 +111,7 @@ def viser_wrapper(
 
     from clipseg.multiclass_segmentor import get_multiclass_segmentation_tensor_mask, visualize_tensor
     seg_masks = get_multiclass_segmentation_tensor_mask(prompt, image_folder)
-    visualize_tensor(seg_masks, save_path="clip_seg_masks_viz.png")
+    visualize_tensor(seg_masks, save_path="clip_seg_masks_viz.png",image_folder=image_folder)
 
     # seg_masks = torch.load(r"C:\Users\avina\Desktop\vggt-repo\clipseg\multiclass_segmentation_masks.pt")  # (num_images, H, W)
 

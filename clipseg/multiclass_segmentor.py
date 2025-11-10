@@ -60,7 +60,16 @@ def get_multiclass_segmentation_tensor_mask(prompts, image_folder, threshold=0.5
 def save_tensor(tensor, filename):
     torch.save(tensor, filename+".pt")
 
-def visualize_tensor(tensor, save_path=None):
+def visualize_tensor(tensor, save_path=None, image_folder=None, alpha=0.5):
+    """
+    Visualize segmentation masks, optionally overlaying them on original images.
+
+    Args:
+        tensor (torch.Tensor): Segmentation masks (N, H, W).
+        save_path (str, optional): If provided, saves the figure.
+        image_folder (str, optional): If provided, overlays masks on images from this folder.
+        alpha (float): Transparency for mask overlay.
+    """
     seg_masks_np = tensor.cpu().numpy()  # shape: (N, H, W) or (N, H, W, 1)
     if seg_masks_np.ndim == 4:
         seg_masks_np = seg_masks_np.squeeze(-1)
@@ -79,11 +88,28 @@ def visualize_tensor(tensor, save_path=None):
     elif cols == 1:
         axes = np.array([[ax] for ax in axes])
 
+    image_files = []
+    if image_folder is not None:
+        image_files = [f for f in os.listdir(image_folder) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+        image_files.sort()  # Ensure consistent order
+
     for i in range(num_masks):
         r, c = divmod(i, cols)
         ax = axes[r, c]
-        ax.imshow(seg_masks_np[i], cmap='tab20')
-        ax.set_title(f"Mask {i}")
+        mask = seg_masks_np[i]
+        if image_folder is not None and i < len(image_files):
+            image_path = os.path.join(image_folder, image_files[i])
+            image = Image.open(image_path).convert("RGB")
+            image_np = np.array(image)
+            mask_color = (plt.cm.tab20(mask / (mask.max() if mask.max() > 0 else 1))[:, :, :3] * 255).astype(np.uint8)
+            overlay = image_np.copy()
+            mask_bool = mask > 0
+            overlay[mask_bool] = (1 - alpha) * image_np[mask_bool] + alpha * mask_color[mask_bool]
+            ax.imshow(overlay.astype(np.uint8))
+            ax.set_title(f"Overlay: {image_files[i]}")
+        else:
+            ax.imshow(mask, cmap='tab20')
+            ax.set_title(f"Mask {i}")
         ax.axis('off')
 
     # Hide any unused subplots
