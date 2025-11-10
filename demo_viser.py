@@ -41,8 +41,6 @@ from vggt.utils.geometry import closed_form_inverse_se3, unproject_depth_map_to_
 from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 
 
-prompt = "vehicle"
-
 
 def save_point_cloud_as_ply(filename, points, colors):
     """
@@ -73,6 +71,7 @@ def viser_wrapper(
     background_mode: bool = False,
     mask_sky: bool = False,
     image_folder: str = None,
+    prompt: str = None,  # <-- add this parameter
 ):
     """
     Visualize predicted 3D points and camera poses with viser.
@@ -499,6 +498,7 @@ def main():
         background_mode=args.background_mode,
         mask_sky=args.mask_sky,
         image_folder=args.image_folder,
+        prompt=args.prompt,  # <-- add this line
     )
     print("Visualization complete")
 
