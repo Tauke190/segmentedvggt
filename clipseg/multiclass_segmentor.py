@@ -71,9 +71,17 @@ def visualize_tensor(tensor, save_path=None):
 
     fig, axes = plt.subplots(rows, cols, figsize=(6 * cols, 5 * rows))
 
+    # Ensure axes is always 2D for consistent indexing
+    if rows == 1 and cols == 1:
+        axes = np.array([[axes]])
+    elif rows == 1:
+        axes = np.array([axes])
+    elif cols == 1:
+        axes = np.array([[ax] for ax in axes])
+
     for i in range(num_masks):
         r, c = divmod(i, cols)
-        ax = axes[r, c] if rows > 1 else axes[c]
+        ax = axes[r, c]
         ax.imshow(seg_masks_np[i], cmap='tab20')
         ax.set_title(f"Mask {i}")
         ax.axis('off')
@@ -81,8 +89,7 @@ def visualize_tensor(tensor, save_path=None):
     # Hide any unused subplots
     for j in range(num_masks, rows * cols):
         r, c = divmod(j, cols)
-        ax = axes[r, c] if rows > 1 else axes[c]
-        ax.axis('off')
+        axes[r, c].axis('off')
 
     plt.tight_layout()
     if save_path is not None:
