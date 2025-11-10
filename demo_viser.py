@@ -335,6 +335,11 @@ def viser_wrapper(
     # Add the camera frames to the scene
     visualize_frames(cam_to_world, images)
 
+    # Save the filtered/confident points (same as used for visualization)
+    save_mask = (conf_flat >= np.percentile(conf_flat, init_conf_threshold)) & (conf_flat > 0.2)
+    save_point_cloud_as_ply("output_pointcloud.ply", points_centered[save_mask], colors_flat[save_mask])
+    print("Saved 3D point cloud to output_pointcloud.ply")
+
     print("Starting viser server...")
     # If background_mode is True, spawn a daemon thread so the main thread can continue.
     if background_mode:
@@ -348,11 +353,6 @@ def viser_wrapper(
     else:
         while True:
             time.sleep(0.01)
-
-    # Save the filtered/confident points (same as used for visualization)
-    save_mask = (conf_flat >= np.percentile(conf_flat, init_conf_threshold)) & (conf_flat > 0.2)
-    save_point_cloud_as_ply("output_pointcloud.ply", points_centered[save_mask], colors_flat[save_mask])
-    print("Saved 3D point cloud to output_pointcloud.ply")
 
     return server
 
