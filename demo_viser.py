@@ -420,6 +420,9 @@ parser.add_argument(
     "--conf_threshold", type=float, default=25.0, help="Initial percentage of low-confidence points to filter out"
 )
 parser.add_argument("--mask_sky", action="store_true", help="Apply sky segmentation to filter out sky points")
+parser.add_argument(
+    "--prompt", type=str, default="vehicle", help="Segmentation prompt for CLIPSeg (e.g., 'vehicle', 'person', etc.)"
+)
 
 
 def main():
