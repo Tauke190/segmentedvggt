@@ -43,6 +43,28 @@ from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 
 prompt = "vehicle"
 
+
+def save_point_cloud_as_ply(filename, points, colors):
+    """
+    Save a point cloud to a PLY file.
+
+    Args:
+        filename (str): Output file path.
+        points (np.ndarray): (N, 3) array of XYZ coordinates.
+        colors (np.ndarray): (N, 3) array of RGB colors (uint8).
+    """
+    assert points.shape[0] == colors.shape[0]
+    with open(filename, 'w') as f:
+        f.write("ply\n")
+        f.write("format ascii 1.0\n")
+        f.write(f"element vertex {points.shape[0]}\n")
+        f.write("property float x\nproperty float y\nproperty float z\n")
+        f.write("property uchar red\nproperty uchar green\nproperty uchar blue\n")
+        f.write("end_header\n")
+        for p, c in zip(points, colors):
+            f.write(f"{p[0]} {p[1]} {p[2]} {c[0]} {c[1]} {c[2]}\n")
+
+
 def viser_wrapper(
     pred_dict: dict,
     port: int = 8080,
@@ -87,10 +109,11 @@ def viser_wrapper(
     depth_conf = pred_dict["depth_conf"]  # (S, H, W)
 
     S, H, W, _ = depth_map.shape
-    # from mutliclass_segmentor import get_multiclass_segmentation_tensor_mask, visualize_tensor
-    # seg_masks = get_multiclass_segmentation_tensor_mask(prompt, image_folder)
 
-    seg_masks = torch.load(r"C:\Users\avina\Desktop\vggt-repo\clipseg\multiclass_segmentation_masks.pt")  # (num_images, H, W)
+    from vggt.clipseg.multiclass_segmentor import get_multiclass_segmentation_tensor_mask, visualize_tensor
+    seg_masks = get_multiclass_segmentation_tensor_mask(prompt, image_folder)
+
+    # seg_masks = torch.load(r"C:\Users\avina\Desktop\vggt-repo\clipseg\multiclass_segmentation_masks.pt")  # (num_images, H, W)
 
    
     seg_masks = seg_masks.float().unsqueeze(1)  # (3, 1, 520, 779)
@@ -178,7 +201,6 @@ def viser_wrapper(
     # )
 
 
-    # ...existing code...
     #---------------------->
     # Define 5 distinct colors for mask values 1-5 (RGB, 0-255)
     mask_colors = np.array([
@@ -326,6 +348,11 @@ def viser_wrapper(
     else:
         while True:
             time.sleep(0.01)
+
+    # Save the filtered/confident points (same as used for visualization)
+    save_mask = (conf_flat >= np.percentile(conf_flat, init_conf_threshold)) & (conf_flat > 0.2)
+    save_point_cloud_as_ply("output_pointcloud.ply", points_centered[save_mask], colors_flat[save_mask])
+    print("Saved 3D point cloud to output_pointcloud.ply")
 
     return server
 
