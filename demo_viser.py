@@ -429,6 +429,22 @@ parser.add_argument(
 )
 
 
+def load_with_strict_false(model, url_or_path: str):
+    if os.path.isfile(url_or_path):
+        state = torch.load(url_or_path, map_location="cpu")
+    else:
+        state = torch.hub.load_state_dict_from_url(url_or_path, map_location="cpu")
+    # unwrap common wrappers
+    if isinstance(state, dict) and "state_dict" in state:
+        state = state["state_dict"]
+    # strip 'module.' if present
+    new_state = { (k[7:] if k.startswith("module.") else k): v for k, v in state.items() }
+    msg = model.load_state_dict(new_state, strict=False)
+    print("Loaded checkpoint with strict=False")
+    print("Missing keys:", msg.missing_keys)       # will include segmentation_head.*
+    print("Unexpected keys:", msg.unexpected_keys)
+    return msg
+
 def main():
     """
     Main function for the VGGT demo with viser for 3D visualization.
@@ -453,11 +469,9 @@ def main():
     print(f"Using device: {device}")
 
     print("Initializing and loading VGGT model...")
-    # model = VGGT.from_pretrained("facebook/VGGT-1B")
-
-    model = VGGT()
+    model = VGGT()  # enable_segmentation=True by default in your VGGT
     _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
-    model.load_state_dict(torch.hub.load_state_dict_from_url(_URL))
+    load_with_strict_false(model, _URL)
 
     model.eval()
     model = model.to(device)
