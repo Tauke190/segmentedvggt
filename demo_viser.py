@@ -104,16 +104,18 @@ def viser_wrapper(
     world_points_map = pred_dict["world_points"]  # (S, H, W, 3)
     conf_map = pred_dict["world_points_conf"]  # (S, H, W)
 
-    depth_map = pred_dict["depth"]  # (S, H, W, 1) -----> # (S, H, W, 2) 1 for depth, 1 for segmentation mask
+    depth_map = pred_dict["depth"]  # Changed below : (S, H, W, 1) -----> # (S, H, W, 2) 1 for depth, 1 for segmentation mask
     depth_conf = pred_dict["depth_conf"]  # (S, H, W)
 
     S, H, W, _ = depth_map.shape
 
+
+    #-------------------------------------------------------------------------------------------------#
     from clipseg.multiclass_segmentor import get_multiclass_segmentation_tensor_mask, visualize_tensor
     seg_masks = get_multiclass_segmentation_tensor_mask(prompt, image_folder)
     visualize_tensor(seg_masks, save_path="clip_seg_masks_viz.png",image_folder=image_folder)
 
-    # seg_masks = torch.load(r"C:\Users\avina\Desktop\vggt-repo\clipseg\multiclass_segmentation_masks.pt")  # (num_images, H, W)
+    #-------------------------------------------------------------------------------------------------#
 
    
     seg_masks = seg_masks.float().unsqueeze(1)  # (3, 1, 520, 779)
@@ -127,6 +129,7 @@ def viser_wrapper(
 
     # Expand depth_map to have 2 channels: depth and segmentation mask
 
+     # Changed below : (S, H, W, 1) -----> # (S, H, W, 2) 1 for depth, 1 for segmentation mask
     depth_map_seg = np.concatenate([depth_map, seg_masks_resized], axis=-1)
 
     print(f"Final Mask{depth_map_seg.shape}")
@@ -473,6 +476,13 @@ def main():
     with torch.no_grad():
         with torch.cuda.amp.autocast(dtype=dtype):
             predictions = model(images)
+
+    seg_logits = predictions["segmentation_logits"]  # [B,S,1,H,W]
+    seg_mask = (torch.sigmoid(seg_logits) > 0.5).float()
+
+    print("seg_mask shape:", seg_mask.shape)
+
+
 
     print("Converting pose encoding to extrinsic and intrinsic matrices...")
     extrinsic, intrinsic = pose_encoding_to_extri_intri(predictions["pose_enc"], images.shape[-2:])

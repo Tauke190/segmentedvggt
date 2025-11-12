@@ -53,11 +53,13 @@ class DPTHead(nn.Module):
         pos_embed: bool = True,
         feature_only: bool = False,
         down_ratio: int = 1,
+        return_conf: bool = True,          # <-- NEW
     ) -> None:
         super(DPTHead, self).__init__()
         self.patch_size = patch_size
         self.activation = activation
         self.conf_activation = conf_activation
+        self.return_conf = return_conf     # <-- NEW
         self.pos_embed = pos_embed
         self.feature_only = feature_only
         self.down_ratio = down_ratio
@@ -240,8 +242,15 @@ class DPTHead(nn.Module):
             return out.view(B, S, *out.shape[1:])
 
         out = self.scratch.output_conv2(out)
-        preds, conf = activate_head(out, activation=self.activation, conf_activation=self.conf_activation)
 
+        # If confidence disabled (e.g. segmentation), skip splitting
+        if not self.return_conf:
+            # Return raw logits (activation="identity" in the segmentation head)
+            preds = out.view(B, S, *out.shape[1:])
+            return preds, None  # second value kept for API consistency
+        
+        
+        preds, conf = activate_head(out, activation=self.activation, conf_activation=self.conf_activation)
         preds = preds.view(B, S, *preds.shape[1:])
         conf = conf.view(B, S, *conf.shape[1:])
         return preds, conf
