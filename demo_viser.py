@@ -158,7 +158,10 @@ def viser_wrapper(
     colors_flat = (colors.reshape(-1, 3) * 255).astype(np.uint8)
     conf_flat = conf.reshape(-1)
 
-    cam_to_world_mat = closed_form_inverse_se3(extrinsics_cam)  # shape (S, 4, 4) typically
+    # Get extrinsics from pred_dict before inverting
+    extrinsics_cam = pred_dict["extrinsic"]   # shape (S, 3, 4)
+    intrinsics_cam = pred_dict["intrinsic"]  # (S, 3, 3)
+    cam_to_world_mat = closed_form_inverse_se3(extrinsics_cam)  # returns (S, 4, 4)
     # For convenience, we store only (3,4) portion
     cam_to_world = cam_to_world_mat[:, :3, :]
 
