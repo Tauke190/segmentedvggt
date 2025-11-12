@@ -104,48 +104,39 @@ def viser_wrapper(
     world_points_map = pred_dict["world_points"]  # (S, H, W, 3)
     conf_map = pred_dict["world_points_conf"]  # (S, H, W)
 
-    depth_map = pred_dict["depth"]  # Changed below : (S, H, W, 1) -----> # (S, H, W, 2) 1 for depth, 1 for segmentation mask
-    depth_conf = pred_dict["depth_conf"]  # (S, H, W)
-
+    depth_map = pred_dict["depth"]          # (S,H,W,1)
+    depth_conf = pred_dict["depth_conf"]    # (S,H,W)
     S, H, W, _ = depth_map.shape
 
+    # Get segmentation mask (already thresholded) shape [S,1,H,W]
+    seg_mask_ch_first = pred_dict.get("segmentation_logits", None)
+    if seg_mask_ch_first is None:
+        print("Segmentation mask not found; proceeding with depth only.")
+        depth_map_seg = depth_map  # fall back
+    else:
+        # Move channel axis to last to match depth_map (S,H,W,1)
+        # seg_mask_ch_first: (S,1,H,W) -> (S,H,W,1)
+        seg_mask_last = np.moveaxis(seg_mask_ch_first, 1, -1).astype(depth_map.dtype)
+        print("seg_mask_last shape:", seg_mask_last.shape)  # (S,H,W,1)
 
-    #-------------------------------------------------------------------------------------------------#
-    from clipseg.multiclass_segmentor import get_multiclass_segmentation_tensor_mask, visualize_tensor
-    seg_masks = get_multiclass_segmentation_tensor_mask(prompt, image_folder)
-    visualize_tensor(seg_masks, save_path="clip_seg_masks_viz.png",image_folder=image_folder)
+        # Concatenate -> (S,H,W,2): channel 0 depth, channel 1 mask
+        depth_map_seg = np.concatenate([depth_map, seg_mask_last], axis=-1)
+        print("depth_map_seg shape:", depth_map_seg.shape)
 
-    #-------------------------------------------------------------------------------------------------#
-
-   
-    seg_masks = seg_masks.float().unsqueeze(1)  # (3, 1, 520, 779)
-    seg_masks_resized = F.interpolate(seg_masks, size=(350, 518), mode='nearest')
-    seg_masks_resized = seg_masks_resized.squeeze(1).unsqueeze(-1)
-
-    print(f"Loaded Segmentation Mask{seg_masks_resized.shape}")
-
-
-    # visualize_tensor(seg_masks_resized)
-
-    # Expand depth_map to have 2 channels: depth and segmentation mask
-
-     # Changed below : (S, H, W, 1) -----> # (S, H, W, 2) 1 for depth, 1 for segmentation mask
-    depth_map_seg = np.concatenate([depth_map, seg_masks_resized], axis=-1)
-
-    print(f"Final Mask{depth_map_seg.shape}")
-
-
-    extrinsics_cam = pred_dict["extrinsic"]  # (S, 3, 4)
-    intrinsics_cam = pred_dict["intrinsic"]  # (S, 3, 3)
-
-    # Compute world points from depth if not using the precomputed point map
+    # Compute world points
     if not use_point_map:
-        # world_points = unproject_depth_map_to_point_map(depth_map, extrinsics_cam, intrinsics_cam)
-        world_points = unproject_depth_map_to_segmented_point_map(depth_map_seg, extrinsics_cam, intrinsics_cam)
+        if depth_map_seg.shape[-1] == 2: # Depth map with segmentation
+            world_points = unproject_depth_map_to_segmented_point_map(
+                depth_map_seg, pred_dict["extrinsic"], pred_dict["intrinsic"]
+            )
+        else:
+            world_points = unproject_depth_map_to_point_map(
+                depth_map, pred_dict["extrinsic"], pred_dict["intrinsic"]
+            )
         conf = depth_conf
     else:
-        world_points = world_points_map
-        conf = conf_map
+        world_points = pred_dict["world_points"]
+        conf = pred_dict["world_points_conf"]
 
     # Apply sky segmentation if enabled
     if mask_sky and image_folder is not None:
@@ -491,12 +482,14 @@ def main():
         with torch.cuda.amp.autocast(dtype=dtype):
             predictions = model(images)
 
-    seg_logits = predictions["segmentation_logits"]  # [B,S,1,H,W]
-    seg_mask = (torch.sigmoid(seg_logits) > 0.5).float()
-
-    print("seg_mask shape:", seg_mask.shape)
-
-
+    # Build torch seg mask BEFORE squeezing to numpy
+    if "segmentation_logits" in predictions:
+        seg_logits = predictions["segmentation_logits"]          # [B,S,1,H,W]
+        seg_mask = (torch.sigmoid(seg_logits) > 0.5).float()     # binary
+        print("seg_mask (torch) shape:", seg_mask.shape)         # [B,S,1,H,W]
+    else:
+        seg_mask = None
+        print("No segmentation head output found.")
 
     print("Converting pose encoding to extrinsic and intrinsic matrices...")
     extrinsic, intrinsic = pose_encoding_to_extri_intri(predictions["pose_enc"], images.shape[-2:])
@@ -506,7 +499,13 @@ def main():
     print("Processing model outputs...")
     for key in predictions.keys():
         if isinstance(predictions[key], torch.Tensor):
-            predictions[key] = predictions[key].cpu().numpy().squeeze(0)  # remove batch dimension and convert to numpy
+            predictions[key] = predictions[key].cpu().numpy().squeeze(0)  # remove batch dim
+
+    # Also convert seg_mask to numpy (matching squeeze pattern) and store
+    if seg_mask is not None:
+        seg_mask_np = seg_mask.cpu().numpy().squeeze(0)  # [S,1,H,W]
+        predictions["segmentation_logits"] = seg_mask_np  # reuse key as mask now (post-threshold)
+        print("seg_mask (numpy) shape:", seg_mask_np.shape)  # [S,1,H,W]
 
     if args.use_point_map:
         print("Visualizing 3D points from point map")
@@ -526,7 +525,7 @@ def main():
         background_mode=args.background_mode,
         mask_sky=args.mask_sky,
         image_folder=args.image_folder,
-        prompt=args.prompt,  # <-- add this line
+        prompt=args.prompt,
     )
     print("Visualization complete")
 
