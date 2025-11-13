@@ -136,77 +136,29 @@ def viser_wrapper(
     S, H, W, _ = world_points.shape
 
     # Flatten
-    # points = world_points.reshape(-1, 3)
-
     points = world_points[..., :3].reshape(-1, 3)  # Only xyz
-    mask = world_points[..., 3].reshape(-1)        # Mask values
-
+    mask = world_points[..., 3].reshape(-1)        # Mask values (may be prob if passed through)
     print("Unique values in mask:", np.unique(mask))
 
     colors_flat = (colors.reshape(-1, 3) * 255).astype(np.uint8)
     conf_flat = conf.reshape(-1)
 
-    # Get extrinsics from pred_dict before inverting
-    extrinsics_cam = pred_dict["extrinsic"]   # shape (S, 3, 4)
-    intrinsics_cam = pred_dict["intrinsic"]  # (S, 3, 3)
-    cam_to_world_mat = closed_form_inverse_se3(extrinsics_cam)  # returns (S, 4, 4)
-    # For convenience, we store only (3,4) portion
-    cam_to_world = cam_to_world_mat[:, :3, :]
-
-    # Compute scene center and recenter
-    scene_center = np.mean(points, axis=0)
-    points_centered = points - scene_center
-    cam_to_world[..., -1] -= scene_center
-
-    # Store frame indices so we can filter by frame
-    frame_indices = np.repeat(np.arange(S), H * W)
-
-    # Build the viser GUI
-    gui_show_frames = server.gui.add_checkbox("Show Cameras", initial_value=True)
-
-    # Now the slider represents percentage of points to filter out
-    gui_points_conf = server.gui.add_slider(
-        "Confidence Percent", min=0, max=100, step=0.1, initial_value=init_conf_threshold
-    )
-
-    gui_frame_selector = server.gui.add_dropdown(
-        "Show Points from Frames", options=["All"] + [str(i) for i in range(S)], initial_value="All"
-    )
-
-    # # Create the main point cloud handle
-    # # Compute the threshold value as the given percentile
-    # init_threshold_val = np.percentile(conf_flat, init_conf_threshold)
-    # init_conf_mask = (conf_flat >= init_threshold_val) & (conf_flat > 0.1)
-    # point_cloud = server.scene.add_point_cloud(
-    #     name="viser_pcd",
-    #     points=points_centered[init_conf_mask],
-    #     colors=colors_flat[init_conf_mask],
-    #     point_size=0.001,
-    #     point_shape="circle",
-    # )
-
+    # Pull seg probabilities (S,1,H,W) -> (S,H,W,1) -> (-1,)
+    if seg_mask_ch_first is not None:
+        seg_prob_last = np.moveaxis(seg_mask_ch_first, 1, -1).astype(np.float32)  # (S,H,W,1), values in [0,1]
+        seg_prob_flat = seg_prob_last.reshape(-1)                                  # (N,)
+    else:
+        seg_prob_flat = np.zeros((colors_flat.shape[0],), dtype=np.float32)
 
     #---------------------->
-    # Define 5 distinct colors for mask values 1-5 (RGB, 0-255)
-    mask_colors = np.array([
-        [0, 0, 0],    # Black
-        [0, 255, 0],    # Green
-    ], dtype=np.uint8)
+    # Blend original RGB with a highlight color proportional to segmentation probability
+    alpha = 0.8  # overall blending strength
+    highlight_color = np.array([0, 255, 0], dtype=np.uint8)  # green
 
-    # Map mask values to color indices (clip and convert to int 0-1)
-    mask_indices = np.clip(mask.astype(int), 0, 1)
-
-    # Get mask colors for each point
-    mask_color_map = mask_colors[mask_indices]
-
-    alpha = 0.9  # 0 = only original, 1 = only mask color # how much color to blend
-
-    # Add mask color to the original color (clip to 0-255)
-    # colors_with_mask = np.clip(mask_color_map , 0, 255).astype(np.uint8)
-
-    colors_with_mask = np.clip((1 - alpha) * colors_flat + alpha * mask_color_map, 0, 255).astype(np.uint8)
+    colors_float = colors_flat.astype(np.float32)
+    blend = (alpha * seg_prob_flat)[:, None].astype(np.float32)  # (N,1)
+    colors_with_mask = np.clip((1.0 - blend) * colors_float + blend * highlight_color, 0, 255).astype(np.uint8)
     print("colors_with_mask shape:", colors_with_mask.shape)
-    
 
     init_threshold_val = np.percentile(conf_flat, init_conf_threshold)
     init_conf_mask = (conf_flat >= init_threshold_val) & (conf_flat > 0.2)
@@ -217,7 +169,6 @@ def viser_wrapper(
         point_size=0.001,
         point_shape="circle",
     )
-
     #---------------------->
 
     # We will store references to frames & frustums so we can toggle visibility
@@ -283,10 +234,8 @@ def viser_wrapper(
 
     def update_point_cloud() -> None:
         """Update the point cloud based on current GUI selections."""
-        # Here we compute the threshold value based on the current percentage
         current_percentage = gui_points_conf.value
         threshold_val = np.percentile(conf_flat, current_percentage)
-
         print(f"Threshold absolute value: {threshold_val}, percentage: {current_percentage}%")
 
         conf_mask = (conf_flat >= threshold_val) & (conf_flat > 1e-5)
@@ -299,7 +248,8 @@ def viser_wrapper(
 
         combined_mask = conf_mask & frame_mask
         point_cloud.points = points_centered[combined_mask]
-        point_cloud.colors = colors_flat[combined_mask]
+        # Use blended colors driven by segmentation probabilities
+        point_cloud.colors = colors_with_mask[combined_mask]
 
     @gui_points_conf.on_update
     def _(_) -> None:
@@ -469,13 +419,13 @@ def main():
         with torch.cuda.amp.autocast(dtype=dtype):
             predictions = model(images)
 
-    # Build torch seg mask BEFORE squeezing to numpy
+    # Build torch seg probabilities BEFORE squeezing to numpy
+    seg_prob = None
     if "segmentation_logits" in predictions:
         seg_logits = predictions["segmentation_logits"]          # [B,S,1,H,W]
-        seg_mask = (torch.sigmoid(seg_logits) > 0.5).float()     # binary
-        print("seg_mask (torch) shape:", seg_mask.shape)         # [B,S,1,H,W]
+        seg_prob = torch.sigmoid(seg_logits)                     # probabilities in [0,1]
+        print("seg_prob (torch) shape:", seg_prob.shape)         # [B,S,1,H,W]
     else:
-        seg_mask = None
         print("No segmentation head output found.")
 
     print("Converting pose encoding to extrinsic and intrinsic matrices...")
@@ -488,11 +438,12 @@ def main():
         if isinstance(predictions[key], torch.Tensor):
             predictions[key] = predictions[key].cpu().numpy().squeeze(0)  # remove batch dim
 
-    # Also convert seg_mask to numpy (matching squeeze pattern) and store
-    if seg_mask is not None:
-        seg_mask_np = seg_mask.cpu().numpy().squeeze(0)  # [S,1,H,W]
-        predictions["segmentation_logits"] = seg_mask_np  # reuse key as mask now (post-threshold)
-        print("seg_mask (numpy) shape:", seg_mask_np.shape)  # [S,1,H,W]
+    # Also convert seg_prob to numpy (matching squeeze pattern) and store
+    if seg_prob is not None:
+        seg_prob_np = seg_prob.cpu().numpy().squeeze(0)  # [S,1,H,W]
+        # Store probabilities so the viewer can blend colors with confidence
+        predictions["segmentation_logits"] = seg_prob_np
+        print("seg_prob (numpy) shape:", seg_prob_np.shape)  # [S,1,H,W]
 
     if args.use_point_map:
         print("Visualizing 3D points from point map")
