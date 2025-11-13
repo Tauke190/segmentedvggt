@@ -926,24 +926,3 @@ def get_chunk_from_data(data: Any, chunk_id: int, num_chunks: int) -> Any:
         return [get_chunk_from_data(value, chunk_id, num_chunks) for value in data]
     else:
         return data
-
-
-def parse_args():
-    parser = argparse.ArgumentParser(description="Training Script")
-    # ... existing argument definitions ...
-    parser.add_argument("--single_gpu", action="store_true", help="Run without DDP on one GPU")
-    return parser.parse_args()
-
-args = parse_args()
-
-# --- Distributed Initialization ---
-if args.single_gpu:
-    distributed = False
-else:
-    distributed = True  # existing logic
-
-if distributed:
-    # ...existing init code...
-    pass
-# else skip
-
