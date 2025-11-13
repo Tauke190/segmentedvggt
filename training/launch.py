@@ -27,7 +27,6 @@ if importlib.util.find_spec("clipseg") is None:
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--config", type=str, help="YAML config path", required=True)
-    p.add_argument("--single_gpu", action="store_true")
     return p.parse_args()
 
 
@@ -38,7 +37,7 @@ def main():
     cfg = OmegaConf.create(cfg_dict)
     # inject single_gpu flag if trainer expects it
     cfg.single_gpu = args.single_gpu
-    Trainer(cfg)
+    # Trainer(cfg)
 
 
 if __name__ == "__main__":
