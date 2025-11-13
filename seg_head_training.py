@@ -20,17 +20,8 @@ import cv2
 
 import sys
 import os
-
-
-# Try importing CLIPSeg helpers
+import onnxruntime
 from clipseg.multiclass_segmentor import get_multiclass_segmentation_tensor_mask, visualize_tensor
-
-
-try:
-    import onnxruntime
-except ImportError:
-    print("onnxruntime not found. Sky segmentation may not work.")
-
 from visual_util import segment_sky, download_file_from_url
 from vggt.models.vggt import VGGT
 from vggt.utils.load_fn import load_and_preprocess_images
@@ -250,7 +241,7 @@ def main():
         # Optional visualization
         if args.viz_clipseg_masks:
             # visualize_tensor expects [S,H,W] or [S,1,H,W]
-            viz_in = gt_masks[0].cpu()  # [S,1,H,W]
+            viz_in = gt_masks[0].cpu().squeeze(1)  # [S,H,W]
             visualize_tensor(viz_in, save_path="clip_seg_masks_viz.png", image_folder=args.image_folder)
             print("Saved CLIPSeg masks visualization to clip_seg_masks_viz.png")
         model.train()
