@@ -34,7 +34,7 @@ def main():
     with initialize(version_base=None, config_path=cfg_path):
         cfg: DictConfig = compose(config_name=cfg_name)
 
-    # trainer = Trainer(cfg)
+    trainer = Trainer(cfg)
     # trainer.run()
 
 
