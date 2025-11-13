@@ -199,7 +199,7 @@ def viser_wrapper(
     # Get mask colors for each point
     mask_color_map = mask_colors[mask_indices]
 
-    alpha = 0.5  # 0 = only original, 1 = only mask color # how much color to blend
+    alpha = 0.9  # 0 = only original, 1 = only mask color # how much color to blend
 
     # Add mask color to the original color (clip to 0-255)
     # colors_with_mask = np.clip(mask_color_map , 0, 255).astype(np.uint8)
