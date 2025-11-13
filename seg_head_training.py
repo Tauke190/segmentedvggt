@@ -119,7 +119,7 @@ parser.add_argument(
 )
 # --- added args for finetuning with CLIPSeg ---
 parser.add_argument("--finetune_seg", action="store_true", help="Fine-tune the segmentation head on masks")
-parser.add_argument("--clipseg_prompt", type=str, default=None, help="Comma-separated prompt(s) for CLIPSeg (e.g., 'sky,road')")
+parser.add_argument("--clipseg_prompt", type=str, default="vehicle", help="Comma-separated prompt(s) for CLIPSeg (e.g., 'sky,road')")
 parser.add_argument("--clipseg_class_index", type=int, default=0, help="Class index to supervise when CLIPSeg returns multi-class")
 parser.add_argument("--epochs", type=int, default=5, help="Number of finetuning epochs")
 parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate for finetuning")
@@ -207,27 +207,26 @@ def main():
     print(f"Found {len(image_names)} images")
 
     images = load_and_preprocess_images(image_names).to(device)
-    print(f"Preprocessed images shape: {images.shape}")
+    print(f"Preprocessed images shape (raw): {images.shape}")
+
+    # Ensure shape [1, S, 3, H, W]; if loader returned [1,3,H,W], add S=1
+    if images.dim() == 4:            # [B,3,H,W]
+        images = images.unsqueeze(1) # [B,1,3,H,W]
+        print("Added sequence dimension S=1.")
+    elif images.dim() == 5 and images.size(0) != 1:
+        # If loader returned [S,3,H,W], convert to [1,S,3,H,W]
+        images = images.unsqueeze(0)
+        print("Added batch dimension B=1.")
+    elif images.dim() != 5:
+        raise ValueError(f"Unexpected images tensor shape {images.shape}")
+
+    print(f"Preprocessed images shape (final): {images.shape}")
 
     # -------- optional finetuning of segmentation head using CLIPSeg masks --------
     if args.finetune_seg:
-        if not hasattr(model, "segmentation_head"):
-            raise AttributeError("Model has no attribute 'segmentation_head'.")
-        if args.clipseg_prompt is None:
-            raise ValueError("--clipseg_prompt is required when --finetune_seg is set.")
-
-        # Freeze everything except segmentation head
-        for p in model.parameters():
-            p.requires_grad = False
-        for p in model.segmentation_head.parameters():
-            p.requires_grad = True
-
-        optimizer = torch.optim.AdamW(model.segmentation_head.parameters(), lr=args.lr)
-
         # Expect input images as [B=1,S,3,H,W]
         if images.dim() != 5 or images.size(0) != 1:
             raise ValueError(f"Expected images shape [1,S,3,H,W], got {tuple(images.shape)}")
-
         _, S, _, H, W = images.shape
 
         # Build GT masks from CLIPSeg for the provided prompt(s)
