@@ -97,19 +97,15 @@ def apply_sky_segmentation(conf: np.ndarray, image_folder: str) -> np.ndarray:
     print("Sky segmentation applied successfully")
     return conf
 
-
-parser = argparse.ArgumentParser(description="VGGT demo (inference only, no visualization)")
-parser.add_argument(
-    "--image_folder", type=str, default="examples/test/images/", help="Path to folder containing images"
-)
-# --- added args for finetuning with CLIPSeg ---
-parser.add_argument("--finetune_seg", action="store_true", help="Fine-tune the segmentation head on masks")
-parser.add_argument("--clipseg_prompt", type=str, default="vehicle", help="Comma-separated prompt(s) for CLIPSeg (e.g., 'sky,road')")
-parser.add_argument("--clipseg_class_index", type=int, default=0, help="Class index to supervise when CLIPSeg returns multi-class")
-parser.add_argument("--epochs", type=int, default=5, help="Number of finetuning epochs")
+parser = argparse.ArgumentParser(description="VGGT segmentation head training")
+parser.add_argument("--epochs", type=int, default=5, help="Number of finetuning epochs per scene")
 parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate for finetuning")
 parser.add_argument("--save_path", type=str, default="vggt_seg_finetuned.pt", help="Where to save finetuned weights")
 parser.add_argument("--viz_clipseg_masks", action="store_true", help="Save a visualization of CLIPSeg masks")
+
+# Fixed defaults for training (since CLI args removed)
+DEFAULT_CLIPSEG_PROMPT = "vehicle"
+DEFAULT_CLIPSEG_CLASS_INDEX = 0
 
 def load_with_strict_false(model, url_or_path: str):
     if os.path.isfile(url_or_path):
@@ -169,141 +165,157 @@ def build_clipseg_gt_masks(image_folder: str, target_hw, prompt: str, class_inde
     return seg_masks.unsqueeze(0).to(device)
 
 
+# Fixed dataset root for multiview finetuning
+DATASET_ROOT = "/dataset/train"
+
+def find_scene_prompt_and_images(scene_dir: str):
+    """
+    Locate prompt.txt and images directory for a scene.
+    Returns (prompt_string, images_dir_path).
+    Accepts:
+      scene_dir/prompt.txt + scene_dir/images/
+      OR scene_dir/images/prompt.txt + scene_dir/images/
+    """
+    candidate_prompt_paths = [
+        os.path.join(scene_dir, "prompt.txt"),
+        os.path.join(scene_dir, "images", "prompt.txt"),
+    ]
+    prompt_path = next((p for p in candidate_prompt_paths if os.path.isfile(p)), None)
+    if prompt_path is None:
+        raise FileNotFoundError(f"No prompt.txt found in {scene_dir} or its images/ subfolder.")
+    # images directory
+    images_dir = os.path.join(scene_dir, "images")
+    if not os.path.isdir(images_dir):
+        raise FileNotFoundError(f"Images directory not found at {images_dir}")
+    with open(prompt_path, "r") as f:
+        # Use first non-empty line; allow comma-separated prompts
+        lines = [l.strip() for l in f.readlines() if l.strip()]
+        if not lines:
+            raise ValueError(f"prompt.txt at {prompt_path} is empty.")
+        prompt = lines[0]
+    return prompt, images_dir
+
+def list_scenes(dataset_root: str):
+    """
+    Returns list of absolute scene directories under dataset_root.
+    """
+    if not os.path.isdir(dataset_root):
+        raise FileNotFoundError(f"Dataset root not found: {dataset_root}")
+    scenes = []
+    for name in sorted(os.listdir(dataset_root)):
+        full = os.path.join(dataset_root, name)
+        if os.path.isdir(full):
+            scenes.append(full)
+    if not scenes:
+        raise ValueError(f"No scene folders found in {dataset_root}")
+    return scenes
+
+def get_prompt_for_folder(image_folder: str) -> str:
+    # Try image_folder/prompt.txt and parent/prompt.txt
+    candidates = [
+        os.path.join(image_folder, "prompt.txt"),
+        os.path.join(os.path.dirname(image_folder.rstrip("/")), "prompt.txt"),
+    ]
+    for p in candidates:
+        if os.path.isfile(p):
+            with open(p, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        return line
+    return DEFAULT_CLIPSEG_PROMPT  # fallback
+
 def main():
-    """
-    Main function for VGGT inference (no visualization).
-    """
     args = parser.parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
     print("Initializing and loading VGGT model...")
-    model = VGGT()  # enable_segmentation=True by default in your VGGT
+    model = VGGT()
     _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
     load_with_strict_false(model, _URL)
-
-    model.eval()
     model = model.to(device)
 
-    print(f"Loading images from {args.image_folder}...")
-    image_names = glob.glob(os.path.join(args.image_folder, "*"))
-    print(f"Found {len(image_names)} images")
+    # Freeze backbone, allow segmentation head
+    for p in model.parameters():
+        p.requires_grad = False
+    if not hasattr(model, "segmentation_head"):
+        raise AttributeError("Model missing segmentation_head.")
+    for p in model.segmentation_head.parameters():
+        p.requires_grad = True
+    optimizer = torch.optim.AdamW(model.segmentation_head.parameters(), lr=args.lr)
+    print(f"Optimizer initialized (lr={args.lr})")
 
-    images = load_and_preprocess_images(image_names).to(device)
-    print(f"Preprocessed images shape (raw): {images.shape}")
+    # Collect scenes
+    scenes = list_scenes(DATASET_ROOT)
+    print(f"Found {len(scenes)} scenes under {DATASET_ROOT}")
 
-    # Ensure shape [1, S, 3, H, W]; if loader returned [1,3,H,W], add S=1
-    if images.dim() == 4:            # [B,3,H,W]
-        images = images.unsqueeze(1) # [B,1,3,H,W]
-        print("Added sequence dimension S=1.")
-    elif images.dim() == 5 and images.size(0) != 1:
-        # If loader returned [S,3,H,W], convert to [1,S,3,H,W]
-        images = images.unsqueeze(0)
-        print("Added batch dimension B=1.")
-    elif images.dim() != 5:
-        raise ValueError(f"Unexpected images tensor shape {images.shape}")
+    for scene_idx, scene_dir in enumerate(scenes, 1):
+        prompt, images_dir = find_scene_prompt_and_images(scene_dir)
+        print(f"[Scene {scene_idx}/{len(scenes)}] prompt='{prompt}' images_dir='{images_dir}'")
 
-    print(f"Preprocessed images shape (final): {images.shape}")
+        image_names = sorted(glob.glob(os.path.join(images_dir, "*")))
+        if not image_names:
+            print(f"Skipping empty scene {scene_dir}")
+            continue
 
-    # -------- optional finetuning of segmentation head using CLIPSeg masks --------
-    if args.finetune_seg:
-        # Expect input images as [B=1,S,3,H,W]
+        images = load_and_preprocess_images(image_names).to(device)
+        # Normalize to [1,S,3,H,W]
+        if images.dim() == 4:
+            images = images.unsqueeze(0)
+        elif images.dim() == 5:
+            if images.size(0) == 1 and images.size(2) == 3:
+                pass
+            elif images.size(1) == 1 and images.size(2) == 3:
+                images = images.squeeze(1).unsqueeze(0)
+            else:
+                print(f"Skipping scene (unrecognized shape): {tuple(images.shape)}")
+                continue
+        else:
+            print(f"Skipping scene (unexpected tensor rank): {tuple(images.shape)}")
+            continue
+
         if images.dim() != 5 or images.size(0) != 1:
-            raise ValueError(f"Expected images shape [1,S,3,H,W], got {tuple(images.shape)}")
-        if args.clipseg_prompt is None:
-            raise ValueError("--clipseg_prompt must be provided when --finetune_seg is set.")
+            print(f"Skipping scene (shape mismatch): {tuple(images.shape)}")
+            continue
 
         _, S, _, H, W = images.shape
 
-        # Freeze all except segmentation head
-        for p in model.parameters():
-            p.requires_grad = False
-        if not hasattr(model, "segmentation_head"):
-            raise AttributeError("Model missing segmentation_head.")
-        for p in model.segmentation_head.parameters():
-            p.requires_grad = True
-
-        optimizer = torch.optim.AdamW(model.segmentation_head.parameters(), lr=args.lr)
-        print(f"Optimizer initialized for segmentation head with lr={args.lr}")
-
-        # Build GT masks from CLIPSeg for the provided prompt(s)
+        # Build GT masks
         gt_masks = build_clipseg_gt_masks(
-            args.image_folder,
+            images_dir,
             (H, W),
-            args.clipseg_prompt,
-            args.clipseg_class_index,
+            prompt,
+            DEFAULT_CLIPSEG_CLASS_INDEX,
             device,
         )  # [1,S,1,H,W]
 
         if gt_masks.shape[1] != S:
-            raise ValueError(f"CLIPSeg produced {gt_masks.shape[1]} masks, but {S} images were loaded.")
+            print(f"Skipping scene (mask/image count mismatch {gt_masks.shape[1]} vs {S})")
+            continue
 
-        # Optional visualization
         if args.viz_clipseg_masks:
-            # visualize_tensor expects [S,H,W] or [S,1,H,W]
-            viz_in = gt_masks[0].cpu().squeeze(1)  # [S,H,W]
-            visualize_tensor(viz_in, save_path="clip_seg_masks_viz.png", image_folder=args.image_folder)
-            print("Saved CLIPSeg masks visualization to clip_seg_masks_viz.png")
+            viz_in = gt_masks[0].cpu().squeeze(1)
+            viz_name = f"clipseg_masks_scene_{scene_idx}.png"
+            visualize_tensor(viz_in, save_path=viz_name, image_folder=images_dir)
+            print(f"Saved CLIPSeg masks visualization to {viz_name}")
+
+        # Train for this scene
         model.train()
         for epoch in range(1, args.epochs + 1):
             optimizer.zero_grad(set_to_none=True)
-            out = model(images)  # logits at [1,S,1,H,W] expected
+            out = model(images)
             if "segmentation_logits" not in out:
                 raise RuntimeError("Model did not produce 'segmentation_logits'.")
             logits = out["segmentation_logits"]  # [1,S,1,H,W]
             loss = F.binary_cross_entropy_with_logits(logits, gt_masks)
             loss.backward()
             optimizer.step()
-            print(f"[seg finetune] epoch {epoch}/{args.epochs} loss={loss.item():.4f}")
+            print(f"[scene {scene_idx} epoch {epoch}/{args.epochs}] loss={loss.item():.4f}")
 
-        # Save finetuned weights
-        torch.save({"model": model.state_dict()}, args.save_path)
-        print(f"Saved finetuned weights to {args.save_path}")
+    # Save after all scenes
+    torch.save({"model": model.state_dict()}, args.save_path)
+    print(f"Saved trained weights to {args.save_path}")
 
-        model.eval()
-
-    print("Running inference...")
-    # Use autocast only on CUDA; avoid CUDA-only calls on CPU
-    if device == "cuda":
-        dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
-        with torch.no_grad():
-            with torch.cuda.amp.autocast(dtype=dtype):
-                predictions = model(images)
-    else:
-        with torch.no_grad():
-            predictions = model(images)
-
-    # Build torch seg mask BEFORE squeezing to numpy
-    if "segmentation_logits" in predictions:
-        seg_logits = predictions["segmentation_logits"]          # [B,S,1,H,W]
-        seg_mask = (torch.sigmoid(seg_logits) > 0.5).float()     # binary
-        print("seg_mask (torch) shape:", seg_mask.shape)         # [B,S,1,H,W]
-    else:
-        seg_mask = None
-        print("No segmentation head output found.")
-
-    print("Converting pose encoding to extrinsic and intrinsic matrices...")
-    extrinsic, intrinsic = pose_encoding_to_extri_intri(predictions["pose_enc"], images.shape[-2:])
-    predictions["extrinsic"] = extrinsic
-    predictions["intrinsic"] = intrinsic
-
-    print("Processing model outputs...")
-    for key in predictions.keys():
-        if isinstance(predictions[key], torch.Tensor):
-            predictions[key] = predictions[key].cpu().numpy().squeeze(0)  # remove batch dim
-
-    if seg_mask is not None:
-        seg_mask_np = seg_mask.cpu().numpy().squeeze(0)  # [S,1,H,W]
-        predictions["segmentation_logits"] = seg_mask_np
-        print("seg_mask (numpy) shape:", seg_mask_np.shape)
-
-    # No visualization; just report and exit
-    print("Inference complete.")
-    print({
-        "images": predictions["images"].shape if "images" in predictions else None,
-        "depth": predictions.get("depth", None).shape if "depth" in predictions else None,
-        "pose_enc": predictions.get("pose_enc", None).shape if "pose_enc" in predictions else None,
-    })
-
-if __name__ == "__main__":
-    main()
+    # Optional final inference on last processed scene (if any)
+    print("Training complete.")
