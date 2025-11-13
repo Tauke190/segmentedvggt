@@ -34,8 +34,9 @@ def main():
     with initialize(version_base=None, config_path=cfg_path):
         cfg: DictConfig = compose(config_name=cfg_name)
 
-    trainer = Trainer(cfg)
-    # trainer.run()
+    trainer = Trainer(**cfg)  # unpack config keys as kwargs
+    if hasattr(trainer, "run"):
+        trainer.run()
 
 
 if __name__ == "__main__":

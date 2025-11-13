@@ -1,5 +1,5 @@
 defaults:
-  - default_dataset.yaml
+  - default_dataset
   - _self_
 
 
@@ -76,6 +76,7 @@ model:
   num_seg_classes: 3
   seg_prompts:
     - car
+    - person
     - road
     - building
     - tree

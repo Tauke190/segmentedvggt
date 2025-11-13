@@ -296,6 +296,8 @@ class Trainer:
 
         logging.info("Successfully initialized training components.")
 
+        self.seg_prompts = getattr(self.model_conf, "seg_prompts", None)
+
     def _setup_dataloaders(self):
         """Initializes train and validation datasets and dataloaders."""
         self.train_dataset = None
