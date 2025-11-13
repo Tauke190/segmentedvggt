@@ -5,26 +5,29 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
-from hydra import initialize, compose
-from omegaconf import DictConfig, OmegaConf
+import yaml
+import os
+import sys
+import torch
+from omegaconf import OmegaConf
 from trainer import Trainer
 
 
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument("--config", type=str, help="YAML config path", required=True)
+    p.add_argument("--single_gpu", action="store_true")
+    return p.parse_args()
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Train model with configurable YAML file")
-    parser.add_argument(
-        "--config", 
-        type=str, 
-        default="default",
-        help="Name of the config file (without .yaml extension, default: default)"
-    )
-    args = parser.parse_args()
-
-    with initialize(version_base=None, config_path="config"):
-        cfg = compose(config_name=args.config)
-
-    trainer = Trainer(**cfg)
-    trainer.run()
+    args = parse_args()
+    with open(args.config, "r") as f:
+        cfg_dict = yaml.safe_load(f)
+    cfg = OmegaConf.create(cfg_dict)
+    # inject single_gpu flag if trainer expects it
+    cfg.single_gpu = args.single_gpu
+    Trainer(cfg)
 
 
 if __name__ == "__main__":
