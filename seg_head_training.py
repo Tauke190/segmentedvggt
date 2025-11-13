@@ -21,16 +21,10 @@ import cv2
 import sys
 import os
 
-# Add clipseg folder to Python path
-clipseg_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../clipseg'))
-sys.path.append(clipseg_path)
 
 # Try importing CLIPSeg helpers
-try:
-    from clipseg.multiclass_segmentor import get_multiclass_segmentation_tensor_mask, visualize_tensor
-    CLIPSEG_AVAILABLE = True
-except Exception:
-    CLIPSEG_AVAILABLE = False
+from clipseg.multiclass_segmentor import get_multiclass_segmentation_tensor_mask, visualize_tensor
+
 
 try:
     import onnxruntime
@@ -147,8 +141,6 @@ def build_clipseg_gt_masks(image_folder: str, target_hw, prompt: str, class_inde
     """
     Returns a tensor of shape [1, S, 1, H, W] with binary masks aligned to model input size.
     """
-    if not CLIPSEG_AVAILABLE:
-        raise ImportError("clipseg.multiclass_segmentor not available. Ensure clipseg is on PYTHONPATH.")
 
     # Allow comma-separated prompts -> list
     prompt_arg = [p.strip() for p in prompt.split(",")] if isinstance(prompt, str) else prompt
@@ -256,7 +248,7 @@ def main():
             raise ValueError(f"CLIPSeg produced {gt_masks.shape[1]} masks, but {S} images were loaded.")
 
         # Optional visualization
-        if args.viz_clipseg_masks and CLIPSEG_AVAILABLE:
+        if args.viz_clipseg_masks:
             try:
                 # visualize_tensor expects [S,H,W] or [S,1,H,W]
                 viz_in = gt_masks[0].cpu()  # [S,1,H,W]
