@@ -65,22 +65,24 @@ def visualize_tensor(tensor, save_path=None, image_folder=None, alpha=0.5):
     Visualize segmentation masks, optionally overlaying them on original images.
 
     Args:
-        tensor (torch.Tensor): Segmentation masks (N, H, W).
+        tensor (torch.Tensor): Segmentation masks (N, H, W) or (N, 1, H, W).
         save_path (str, optional): If provided, saves the figure.
         image_folder (str, optional): If provided, overlays masks on images from this folder.
         alpha (float): Transparency for mask overlay.
     """
-    seg_masks_np = tensor.cpu().numpy()  # shape: (N, H, W) or (N, H, W, 1)
+    seg_masks_np = tensor.cpu().numpy()
     if seg_masks_np.ndim == 4:
-        seg_masks_np = seg_masks_np.squeeze(-1)
+        # (N,1,H,W) -> (N,H,W)
+        if seg_masks_np.shape[1] == 1:
+            seg_masks_np = seg_masks_np[:, 0]
+        else:
+            raise ValueError(f"Unexpected mask shape {seg_masks_np.shape} for visualization.")
 
     num_masks = seg_masks_np.shape[0]
-    cols = min(3, num_masks)  # up to 3 columns
+    cols = min(3, num_masks)
     rows = math.ceil(num_masks / cols)
 
     fig, axes = plt.subplots(rows, cols, figsize=(6 * cols, 5 * rows))
-
-    # Ensure axes is always 2D for consistent indexing
     if rows == 1 and cols == 1:
         axes = np.array([[axes]])
     elif rows == 1:
@@ -91,28 +93,37 @@ def visualize_tensor(tensor, save_path=None, image_folder=None, alpha=0.5):
     image_files = []
     if image_folder is not None:
         image_files = [f for f in os.listdir(image_folder) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-        image_files.sort()  # Ensure consistent order
+        image_files.sort()
 
     for i in range(num_masks):
         r, c = divmod(i, cols)
         ax = axes[r, c]
-        mask = seg_masks_np[i]
+        mask = seg_masks_np[i]  # (Hm, Wm)
         if image_folder is not None and i < len(image_files):
             image_path = os.path.join(image_folder, image_files[i])
             image = Image.open(image_path).convert("RGB")
-            image_np = np.array(image)
-            mask_color = (plt.cm.tab20(mask / (mask.max() if mask.max() > 0 else 1))[:, :, :3] * 255).astype(np.uint8)
+            image_np = np.array(image)  # (Hi, Wi, 3)
+
+            Hi, Wi = image_np.shape[:2]
+            Hm, Wm = mask.shape
+            if (Hm, Wm) != (Hi, Wi):
+                # Resize mask to image size using nearest to preserve labels
+                mask = np.array(Image.fromarray(mask).resize((Wi, Hi), resample=Image.NEAREST))
+
+            # Build a color map (handles binary or multiclass)
+            denom = (mask.max() if mask.max() > 0 else 1)
+            mask_color = (plt.cm.tab20(mask / denom)[:, :, :3] * 255).astype(np.uint8)
+
             overlay = image_np.copy()
             mask_bool = mask > 0
-            overlay[mask_bool] = (1 - alpha) * image_np[mask_bool] + alpha * mask_color[mask_bool]
-            ax.imshow(overlay.astype(np.uint8))
+            overlay[mask_bool] = ((1 - alpha) * image_np[mask_bool] + alpha * mask_color[mask_bool]).astype(np.uint8)
+            ax.imshow(overlay)
             ax.set_title(f"Overlay: {image_files[i]}")
         else:
             ax.imshow(mask, cmap='tab20')
             ax.set_title(f"Mask {i}")
         ax.axis('off')
 
-    # Hide any unused subplots
     for j in range(num_masks, rows * cols):
         r, c = divmod(j, cols)
         axes[r, c].axis('off')
