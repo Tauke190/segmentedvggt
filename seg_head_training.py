@@ -46,7 +46,6 @@ def save_point_cloud_as_ply(filename, points, colors):
         f.write("end_header\n")
         for p, c in zip(points, colors):
             f.write(f"{p[0]} {p[1]} {p[2]} {c[0]} {c[1]} {c[2]}\n")
-
 # Helper functions for sky segmentation
 def apply_sky_segmentation(conf: np.ndarray, image_folder: str) -> np.ndarray:
     """
@@ -319,3 +318,6 @@ def main():
 
     # Optional final inference on last processed scene (if any)
     print("Training complete.")
+
+if __name__ == "__main__":
+    main()
