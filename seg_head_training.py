@@ -249,14 +249,10 @@ def main():
 
         # Optional visualization
         if args.viz_clipseg_masks:
-            try:
-                # visualize_tensor expects [S,H,W] or [S,1,H,W]
-                viz_in = gt_masks[0].cpu()  # [S,1,H,W]
-                visualize_tensor(viz_in, save_path="clip_seg_masks_viz.png", image_folder=args.image_folder)
-                print("Saved CLIPSeg masks visualization to clip_seg_masks_viz.png")
-            except Exception as e:
-                print(f"Failed to visualize CLIPSeg masks: {e}")
-
+            # visualize_tensor expects [S,H,W] or [S,1,H,W]
+            viz_in = gt_masks[0].cpu()  # [S,1,H,W]
+            visualize_tensor(viz_in, save_path="clip_seg_masks_viz.png", image_folder=args.image_folder)
+            print("Saved CLIPSeg masks visualization to clip_seg_masks_viz.png")
         model.train()
         for epoch in range(1, args.epochs + 1):
             optimizer.zero_grad(set_to_none=True)
