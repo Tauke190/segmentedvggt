@@ -152,17 +152,23 @@ def viser_wrapper(
         seg_prob_flat = np.zeros((colors_flat.shape[0],), dtype=np.float32)
 
     #---------------------->
-    # Blend using a thresholded (binary) segmentation mask for full/none highlight
-    alpha = 0.8  # overall blending strength
+    # Binary highlight: only points with prob >= threshold are recolored
     highlight_color = np.array([0, 255, 0], dtype=np.uint8)  # green
-    colors_float = colors_flat.astype(np.float32)
 
-    def make_colors(thr: float) -> np.ndarray:
-        seg_binary = (seg_prob_flat >= float(thr)).astype(np.float32)  # (N,)
-        blend = (alpha * seg_binary)[:, None]                           # (N,1)
-        return np.clip((1.0 - blend) * colors_float + blend * highlight_color, 0, 255).astype(np.uint8)
+    def make_colors_binary(thr: float) -> np.ndarray:
+        thr = float(thr)
+        seg_binary = seg_prob_flat >= thr                     # (N,)
+        out = colors_flat.copy()
+        out[seg_binary] = highlight_color                     # highlight only those >= thr
+        # Debug: how many are highlighted
+        try:
+            pct = 100.0 * seg_binary.mean()
+            print(f"Seg >= {thr:.2f}: {seg_binary.sum()}/{seg_binary.size} ({pct:.2f}%) highlighted")
+        except Exception:
+            pass
+        return out
 
-    colors_with_mask = make_colors(seg_threshold)
+    colors_with_mask = make_colors_binary(seg_threshold)
     print("colors_with_mask shape:", colors_with_mask.shape)
 
     # --- FIX: define cam_to_world, frame_indices, and points_centered ---
@@ -292,8 +298,8 @@ def viser_wrapper(
 
         combined_mask = conf_mask & frame_mask & seg_mask_ok
 
-        # Recompute thresholded colors for current seg threshold
-        current_colors = make_colors(gui_seg_threshold.value)
+        # Recompute binary-highlighted colors for current seg threshold
+        current_colors = make_colors_binary(gui_seg_threshold.value)
 
         point_cloud.points = points_centered[combined_mask]
         point_cloud.colors = current_colors[combined_mask]
