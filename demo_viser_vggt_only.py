@@ -160,6 +160,21 @@ def viser_wrapper(
     colors_with_mask = np.clip((1.0 - blend) * colors_float + blend * highlight_color, 0, 255).astype(np.uint8)
     print("colors_with_mask shape:", colors_with_mask.shape)
 
+    # --- FIX: define cam_to_world, frame_indices, and points_centered ---
+    cam_to_world = pred_dict.get("extrinsic")  # (S, 3, 4)
+
+    # Per-point frame indices for filtering (S * H * W,)
+    frame_indices = np.repeat(np.arange(S), H * W)
+
+    # Center the scene so points and camera frustums align
+    valid_pts = np.isfinite(points).all(axis=1)
+    if np.any(valid_pts):
+        center = points[valid_pts].mean(axis=0)
+    else:
+        center = np.zeros(3, dtype=points.dtype)
+    points_centered = points - center
+    # ---------------------------------------------------------------
+
     init_threshold_val = np.percentile(conf_flat, init_conf_threshold)
     init_conf_mask = (conf_flat >= init_threshold_val) & (conf_flat > 0.2)
     point_cloud = server.scene.add_point_cloud(
@@ -202,11 +217,11 @@ def viser_wrapper(
             cam2world_3x4 = extrinsics[img_id]
             T_world_camera = viser_tf.SE3.from_matrix(cam2world_3x4)
 
-            # Add a small frame axis
+            # Add a small frame axis (shifted by the same center)
             frame_axis = server.scene.add_frame(
                 f"frame_{img_id}",
                 wxyz=T_world_camera.rotation().wxyz,
-                position=T_world_camera.translation(),
+                position=T_world_camera.translation() - center,  # shift to match points_centered
                 axes_length=0.05,
                 axes_radius=0.002,
                 origin_radius=0.002,
