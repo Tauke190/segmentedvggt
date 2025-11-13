@@ -47,7 +47,7 @@ from train_utils.optimizer import construct_optimizers
 import os, sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'clipseg')))
-from clipseg.multiclass_segmentor import get_multiclass_segmentation_tensor_mask
+from multiclass_segmentor import get_multiclass_segmentation_tensor_mask
 
 
 class Trainer:
