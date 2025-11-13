@@ -74,6 +74,12 @@ model:
   enable_track: False
   enable_segmentation: true
   num_seg_classes: 3
+  seg_prompts:
+    - car
+    - road
+    - building
+    - tree
+    - sky
 
 distributed:
   backend: gloo

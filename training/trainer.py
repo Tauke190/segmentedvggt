@@ -44,16 +44,8 @@ from train_utils.logging import setup_logging
 from train_utils.normalization import normalize_camera_extrinsics_and_points_batch
 from train_utils.optimizer import construct_optimizers
 
-
 import os, sys
-clipseg_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "clipseg"))
-if clipseg_path not in sys.path:
-    sys.path.append(clipseg_path)
-try:
-    from clipseg.multiclass_segmentor import get_multiclass_segmentation_tensor_mask
-except Exception as e:
-    get_multiclass_segmentation_tensor_mask = None
-    logging.warning(f"CLIPSeg not available: {e}")
+from clipseg.multiclass_segmentor import get_multiclass_segmentation_tensor_mask
 
 
 class Trainer:
