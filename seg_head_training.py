@@ -165,7 +165,7 @@ def build_clipseg_gt_masks(image_folder: str, target_hw, prompt: str, class_inde
 
 
 # Fixed dataset root for multiview finetuning
-DATASET_ROOT = "/dataset/train"
+DATASET_ROOT = "dataset/train"
 
 def find_scene_prompt_and_images(scene_dir: str):
     """
