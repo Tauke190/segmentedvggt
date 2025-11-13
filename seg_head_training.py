@@ -25,7 +25,12 @@ import os
 clipseg_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../clipseg'))
 sys.path.append(clipseg_path)
 
-
+# Try importing CLIPSeg helpers
+try:
+    from clipseg.multiclass_segmentor import get_multiclass_segmentation_tensor_mask, visualize_tensor
+    CLIPSEG_AVAILABLE = True
+except Exception:
+    CLIPSEG_AVAILABLE = False
 
 try:
     import onnxruntime
@@ -36,8 +41,6 @@ from visual_util import segment_sky, download_file_from_url
 from vggt.models.vggt import VGGT
 from vggt.utils.load_fn import load_and_preprocess_images
 from vggt.utils.pose_enc import pose_encoding_to_extri_intri
-
-
 
 def save_point_cloud_as_ply(filename, points, colors):
     """
@@ -58,7 +61,6 @@ def save_point_cloud_as_ply(filename, points, colors):
         f.write("end_header\n")
         for p, c in zip(points, colors):
             f.write(f"{p[0]} {p[1]} {p[2]} {c[0]} {c[1]} {c[2]}\n")
-
 
 # Helper functions for sky segmentation
 def apply_sky_segmentation(conf: np.ndarray, image_folder: str) -> np.ndarray:
@@ -115,7 +117,14 @@ parser = argparse.ArgumentParser(description="VGGT demo (inference only, no visu
 parser.add_argument(
     "--image_folder", type=str, default="examples/test/images/", help="Path to folder containing images"
 )
-
+# --- added args for finetuning with CLIPSeg ---
+parser.add_argument("--finetune_seg", action="store_true", help="Fine-tune the segmentation head on masks")
+parser.add_argument("--clipseg_prompt", type=str, default=None, help="Comma-separated prompt(s) for CLIPSeg (e.g., 'sky,road')")
+parser.add_argument("--clipseg_class_index", type=int, default=0, help="Class index to supervise when CLIPSeg returns multi-class")
+parser.add_argument("--epochs", type=int, default=5, help="Number of finetuning epochs")
+parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate for finetuning")
+parser.add_argument("--save_path", type=str, default="vggt_seg_finetuned.pt", help="Where to save finetuned weights")
+parser.add_argument("--viz_clipseg_masks", action="store_true", help="Save a visualization of CLIPSeg masks")
 
 def load_with_strict_false(model, url_or_path: str):
     if os.path.isfile(url_or_path):
@@ -132,6 +141,50 @@ def load_with_strict_false(model, url_or_path: str):
     print("Missing keys:", msg.missing_keys)       # will include segmentation_head.*
     print("Unexpected keys:", msg.unexpected_keys)
     return msg
+
+# --- helper: build GT masks from CLIPSeg for given folder and prompts ---
+def build_clipseg_gt_masks(image_folder: str, target_hw, prompt: str, class_index: int, device: str) -> torch.Tensor:
+    """
+    Returns a tensor of shape [1, S, 1, H, W] with binary masks aligned to model input size.
+    """
+    if not CLIPSEG_AVAILABLE:
+        raise ImportError("clipseg.multiclass_segmentor not available. Ensure clipseg is on PYTHONPATH.")
+
+    # Allow comma-separated prompts -> list
+    prompt_arg = [p.strip() for p in prompt.split(",")] if isinstance(prompt, str) else prompt
+
+    # get_multiclass_segmentation_tensor_mask(prompt, image_folder) is expected to return
+    # a tensor shaped [S, H, W] for single prompt, or [S, C, H, W] for multiple prompts/classes.
+    seg_masks = get_multiclass_segmentation_tensor_mask(prompt_arg, image_folder)  # torch.Tensor
+    if not torch.is_tensor(seg_masks):
+        seg_masks = torch.as_tensor(seg_masks)
+
+    # Normalize dimensions to [S, C, H, W]
+    if seg_masks.ndim == 3:
+        # [S, H, W] -> [S, 1, H, W]
+        seg_masks = seg_masks.unsqueeze(1)
+    elif seg_masks.ndim == 4:
+        # choose class/channel if multi-class
+        if seg_masks.shape[1] > 1:
+            seg_masks = seg_masks[:, class_index:class_index+1, ...]
+    else:
+        raise ValueError(f"Unexpected CLIPSeg mask shape: {tuple(seg_masks.shape)}")
+
+    # Convert to float, threshold to binary if not already
+    seg_masks = seg_masks.float()
+    # If values are not {0,1}, threshold at 0.5
+    with torch.no_grad():
+        if seg_masks.max() > 1.0 or seg_masks.min() < 0.0:
+            seg_masks = (seg_masks - seg_masks.min()) / (seg_masks.max() - seg_masks.min() + 1e-6)
+        seg_masks = (seg_masks >= 0.5).float()
+
+    # Resize to target HxW using nearest to keep binary labels
+    Ht, Wt = target_hw
+    seg_masks = F.interpolate(seg_masks, size=(Ht, Wt), mode="nearest")  # [S,1,Ht,Wt]
+
+    # Add batch and return [1,S,1,H,W] on device
+    return seg_masks.unsqueeze(0).to(device)
+
 
 def main():
     """
@@ -155,6 +208,67 @@ def main():
 
     images = load_and_preprocess_images(image_names).to(device)
     print(f"Preprocessed images shape: {images.shape}")
+
+    # -------- optional finetuning of segmentation head using CLIPSeg masks --------
+    if args.finetune_seg:
+        if not hasattr(model, "segmentation_head"):
+            raise AttributeError("Model has no attribute 'segmentation_head'.")
+        if args.clipseg_prompt is None:
+            raise ValueError("--clipseg_prompt is required when --finetune_seg is set.")
+
+        # Freeze everything except segmentation head
+        for p in model.parameters():
+            p.requires_grad = False
+        for p in model.segmentation_head.parameters():
+            p.requires_grad = True
+
+        optimizer = torch.optim.AdamW(model.segmentation_head.parameters(), lr=args.lr)
+
+        # Expect input images as [B=1,S,3,H,W]
+        if images.dim() != 5 or images.size(0) != 1:
+            raise ValueError(f"Expected images shape [1,S,3,H,W], got {tuple(images.shape)}")
+
+        _, S, _, H, W = images.shape
+
+        # Build GT masks from CLIPSeg for the provided prompt(s)
+        gt_masks = build_clipseg_gt_masks(
+            args.image_folder,
+            (H, W),
+            args.clipseg_prompt,
+            args.clipseg_class_index,
+            device,
+        )  # [1,S,1,H,W]
+
+        if gt_masks.shape[1] != S:
+            raise ValueError(f"CLIPSeg produced {gt_masks.shape[1]} masks, but {S} images were loaded.")
+
+        # Optional visualization
+        if args.viz_clipseg_masks and CLIPSEG_AVAILABLE:
+            try:
+                # visualize_tensor expects [S,H,W] or [S,1,H,W]
+                viz_in = gt_masks[0].cpu()  # [S,1,H,W]
+                visualize_tensor(viz_in, save_path="clip_seg_masks_viz.png", image_folder=args.image_folder)
+                print("Saved CLIPSeg masks visualization to clip_seg_masks_viz.png")
+            except Exception as e:
+                print(f"Failed to visualize CLIPSeg masks: {e}")
+
+        model.train()
+        for epoch in range(1, args.epochs + 1):
+            optimizer.zero_grad(set_to_none=True)
+            out = model(images)  # logits at [1,S,1,H,W] expected
+            if "segmentation_logits" not in out:
+                raise RuntimeError("Model did not produce 'segmentation_logits'.")
+            logits = out["segmentation_logits"]  # [1,S,1,H,W]
+            loss = F.binary_cross_entropy_with_logits(logits, gt_masks)
+            loss.backward()
+            optimizer.step()
+            print(f"[seg finetune] epoch {epoch}/{args.epochs} loss={loss.item():.4f}")
+
+        # Save finetuned weights
+        torch.save({"model": model.state_dict()}, args.save_path)
+        print(f"Saved finetuned weights to {args.save_path}")
+
+        model.eval()
 
     print("Running inference...")
     # Use autocast only on CUDA; avoid CUDA-only calls on CPU
@@ -198,7 +312,6 @@ def main():
         "depth": predictions.get("depth", None).shape if "depth" in predictions else None,
         "pose_enc": predictions.get("pose_enc", None).shape if "pose_enc" in predictions else None,
     })
-
 
 if __name__ == "__main__":
     main()
