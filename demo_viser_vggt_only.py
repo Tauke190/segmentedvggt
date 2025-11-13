@@ -186,6 +186,18 @@ def viser_wrapper(
     )
     #---------------------->
 
+    # GUI controls for filtering and visualization
+    gui_points_conf = server.gui.add_slider(
+        "Confidence percentile", 0.0, 100.0, step=1.0, initial_value=float(init_conf_threshold)
+    )
+    frame_options = ["All"] + [str(i) for i in range(S)]
+    gui_frame_selector = server.gui.add_dropdown(
+        "Frame", options=frame_options, initial_value="All"
+    )
+    gui_show_frames = server.gui.add_checkbox(
+        "Show camera frames", True
+    )
+
     # We will store references to frames & frustums so we can toggle visibility
     frames: List[viser.FrameHandle] = []
     frustums: List[viser.CameraFrustumHandle] = []
