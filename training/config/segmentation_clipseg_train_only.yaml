@@ -1,5 +1,7 @@
 defaults:
   - default_dataset.yaml
+  - _self_
+
 
 exp_name: seg_head_ft_clipseg
 img_size: 518
