@@ -17,6 +17,7 @@ import numpy as np
 import torch
 from tqdm.auto import tqdm
 import cv2
+import gc
 
 import sys
 import os
@@ -311,6 +312,12 @@ def main():
             loss.backward()
             optimizer.step()
             print(f"[scene {scene_idx} epoch {epoch}/{args.epochs}] loss={loss.item():.4f}")
+
+        # Free per‑scene cache (CPU/GPU) before moving to next scene
+        del images, gt_masks, out, logits, loss
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
 
     # Save after all scenes
     torch.save({"model": model.state_dict()}, args.save_path)
