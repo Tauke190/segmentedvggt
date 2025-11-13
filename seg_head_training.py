@@ -227,7 +227,21 @@ def main():
         # Expect input images as [B=1,S,3,H,W]
         if images.dim() != 5 or images.size(0) != 1:
             raise ValueError(f"Expected images shape [1,S,3,H,W], got {tuple(images.shape)}")
+        if args.clipseg_prompt is None:
+            raise ValueError("--clipseg_prompt must be provided when --finetune_seg is set.")
+
         _, S, _, H, W = images.shape
+
+        # Freeze all except segmentation head
+        for p in model.parameters():
+            p.requires_grad = False
+        if not hasattr(model, "segmentation_head"):
+            raise AttributeError("Model missing segmentation_head.")
+        for p in model.segmentation_head.parameters():
+            p.requires_grad = True
+
+        optimizer = torch.optim.AdamW(model.segmentation_head.parameters(), lr=args.lr)
+        print(f"Optimizer initialized for segmentation head with lr={args.lr}")
 
         # Build GT masks from CLIPSeg for the provided prompt(s)
         gt_masks = build_clipseg_gt_masks(
