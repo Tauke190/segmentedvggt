@@ -82,9 +82,19 @@ model:
     - tree
     - sky
 
+max_epochs: 20
+
 distributed:
-  backend: gloo
+  # check https://docs.pytorch.org/docs/stable/generated/torch.nn.parallel.DistributedDataParallel.html for options
+  backend: nccl
+  comms_dtype: None
+  find_unused_parameters: False
+  timeout_mins: 30
+  gradient_as_bucket_view: True  # Less memory used
+  bucket_cap_mb: 25
   broadcast_buffers: True
 
 cuda:
-  allow_tf32: True
+    cudnn_deterministic: False
+    cudnn_benchmark: False
+    allow_tf32: True
