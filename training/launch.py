@@ -8,7 +8,7 @@ import argparse
 from pathlib import Path
 from hydra import initialize, compose
 from omegaconf import DictConfig
-# from trainer import Trainer
+from trainer import Trainer
 
 
 def main():
@@ -35,7 +35,7 @@ def main():
         cfg: DictConfig = compose(config_name=cfg_name)
 
     trainer = Trainer(cfg)
-    trainer.run()
+    # trainer.run()
 
 
 if __name__ == "__main__":
