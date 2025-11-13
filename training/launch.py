@@ -35,7 +35,7 @@ def main():
         cfg: DictConfig = compose(config_name=cfg_name)
 
     trainer = Trainer(cfg)
-    # trainer.run()
+    trainer.run()
 
 
 if __name__ == "__main__":
