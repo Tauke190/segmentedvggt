@@ -5,38 +5,26 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
-from pathlib import Path
 from hydra import initialize, compose
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from trainer import Trainer
 
 
 def main():
     parser = argparse.ArgumentParser(description="Train model with configurable YAML file")
     parser.add_argument(
-        "--config",
-        type=str,
+        "--config", 
+        type=str, 
         default="default",
-        help="Config name in training/config (no .yaml) OR a path to a .yaml file"
+        help="Name of the config file (without .yaml extension, default: default)"
     )
     args = parser.parse_args()
 
-    cfg_name = args.config
-    cfg_path = "config"  # relative to this file
+    with initialize(version_base=None, config_path="config"):
+        cfg = compose(config_name=args.config)
 
-    p = Path(cfg_name)
-    if p.suffix in {".yaml", ".yml"} or "/" in cfg_name or "\\" in cfg_name:
-        if not p.is_absolute():
-            p = (Path(__file__).parent / p).resolve()
-        cfg_path = str(p.parent)
-        cfg_name = p.stem
-
-    with initialize(version_base=None, config_path=cfg_path):
-        cfg: DictConfig = compose(config_name=cfg_name)
-
-    trainer = Trainer(**cfg)  # unpack config keys as kwargs
-    if hasattr(trainer, "run"):
-        trainer.run()
+    trainer = Trainer(**cfg)
+    trainer.run()
 
 
 if __name__ == "__main__":
