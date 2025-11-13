@@ -54,12 +54,13 @@ def save_point_cloud_as_ply(filename, points, colors):
 def viser_wrapper(
     pred_dict: dict,
     port: int = 8080,
-    init_conf_threshold: float = 50.0,  # represents percentage (e.g., 50 means filter lowest 50%)
+    init_conf_threshold: float = 50.0,
     use_point_map: bool = False,
     background_mode: bool = False,
     mask_sky: bool = False,
     image_folder: str = None,
-    prompt: str = None,  # <-- add this parameter
+    prompt: str = None,
+    seg_threshold: float = 0.5,  # <--- added
 ):
     """
     Visualize predicted 3D points and camera poses with viser.
@@ -151,13 +152,17 @@ def viser_wrapper(
         seg_prob_flat = np.zeros((colors_flat.shape[0],), dtype=np.float32)
 
     #---------------------->
-    # Blend original RGB with a highlight color proportional to segmentation probability
+    # Blend using a thresholded (binary) segmentation mask for full/none highlight
     alpha = 0.8  # overall blending strength
     highlight_color = np.array([0, 255, 0], dtype=np.uint8)  # green
-
     colors_float = colors_flat.astype(np.float32)
-    blend = (alpha * seg_prob_flat)[:, None].astype(np.float32)  # (N,1)
-    colors_with_mask = np.clip((1.0 - blend) * colors_float + blend * highlight_color, 0, 255).astype(np.uint8)
+
+    def make_colors(thr: float) -> np.ndarray:
+        seg_binary = (seg_prob_flat >= float(thr)).astype(np.float32)  # (N,)
+        blend = (alpha * seg_binary)[:, None]                           # (N,1)
+        return np.clip((1.0 - blend) * colors_float + blend * highlight_color, 0, 255).astype(np.uint8)
+
+    colors_with_mask = make_colors(seg_threshold)
     print("colors_with_mask shape:", colors_with_mask.shape)
 
     # --- FIX: define cam_to_world, frame_indices, and points_centered ---
@@ -196,6 +201,12 @@ def viser_wrapper(
     )
     gui_show_frames = server.gui.add_checkbox(
         "Show camera frames", True
+    )
+    gui_seg_threshold = server.gui.add_slider(             # <--- added
+        "Segmentation threshold", 0.0, 1.0, step=0.01, initial_value=float(seg_threshold)
+    )
+    gui_filter_by_seg = server.gui.add_checkbox(           # <--- added
+        "Filter points by segmentation", False
     )
 
     # We will store references to frames & frustums so we can toggle visibility
@@ -273,10 +284,19 @@ def viser_wrapper(
             selected_idx = int(gui_frame_selector.value)
             frame_mask = frame_indices == selected_idx
 
-        combined_mask = conf_mask & frame_mask
+        # Segmentation-based filtering (optional)
+        if gui_filter_by_seg.value:
+            seg_mask_ok = seg_prob_flat >= float(gui_seg_threshold.value)
+        else:
+            seg_mask_ok = np.ones_like(conf_mask, dtype=bool)
+
+        combined_mask = conf_mask & frame_mask & seg_mask_ok
+
+        # Recompute thresholded colors for current seg threshold
+        current_colors = make_colors(gui_seg_threshold.value)
+
         point_cloud.points = points_centered[combined_mask]
-        # Use blended colors driven by segmentation probabilities
-        point_cloud.colors = colors_with_mask[combined_mask]
+        point_cloud.colors = current_colors[combined_mask]
 
     @gui_points_conf.on_update
     def _(_) -> None:
@@ -293,6 +313,14 @@ def viser_wrapper(
             f.visible = gui_show_frames.value
         for fr in frustums:
             fr.visible = gui_show_frames.value
+
+    @gui_seg_threshold.on_update                # <--- added
+    def _(_) -> None:
+        update_point_cloud()
+
+    @gui_filter_by_seg.on_update               # <--- added
+    def _(_) -> None:
+        update_point_cloud()
 
     # Add the camera frames to the scene
     visualize_frames(cam_to_world, images)
@@ -380,7 +408,7 @@ parser.add_argument(
 )
 parser.add_argument("--mask_sky", action="store_true", help="Apply sky segmentation to filter out sky points")
 parser.add_argument(
-    "--prompt", type=str, default="vehicle", help="Segmentation prompt for CLIPSeg (e.g., 'vehicle', 'person', etc.)"
+    "--seg_threshold", type=float, default=0.5, help="Threshold for segmentation probability in [0,1]"
 )
 
 
@@ -490,7 +518,7 @@ def main():
         background_mode=args.background_mode,
         mask_sky=args.mask_sky,
         image_folder=args.image_folder,
-        prompt=args.prompt,
+        seg_threshold=args.seg_threshold,
     )
     print("Visualization complete")
 
