@@ -5,6 +5,8 @@
 # LICENSE file in the root directory of this source tree.
 
 import os
+import argparse
+import torch.nn.functional as F
 
 
 # --- Environment Variable Setup for Performance and Debugging ---
@@ -41,6 +43,18 @@ from train_utils.general import *
 from train_utils.logging import setup_logging
 from train_utils.normalization import normalize_camera_extrinsics_and_points_batch
 from train_utils.optimizer import construct_optimizers
+
+
+# Add CLIPSeg to PYTHONPATH and import
+import sys
+clipseg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "clipseg"))
+if clipseg_root not in sys.path:
+    sys.path.append(clipseg_root)
+try:
+    from clipseg.multiclass_segmentor import get_multiclass_segmentation_tensor_mask
+except Exception as e:
+    get_multiclass_segmentation_tensor_mask = None
+    logging.warning(f"CLIPSeg not available: {e}")
 
 
 class Trainer:
@@ -145,6 +159,17 @@ class Trainer:
         self._setup_components()
         self._setup_dataloaders()
 
+        # Ensure only segmentation head is trainable when doing segmentation finetune
+        if getattr(self.model, "segmentation_head", None) is not None:
+            # Freeze everything first
+            for p in self.model.parameters():
+                p.requires_grad = False
+            # Unfreeze segmentation head
+            for p in self.model.segmentation_head.parameters():
+                p.requires_grad = True
+        trainable_params = [p for p in self.model.parameters() if p.requires_grad]
+        self.optims = construct_optimizers(self.model, self.optim_conf)  # reuse existing helper
+
         # Move model to the correct device
         self.model.to(self.device)
         self.time_elapsed_meter = DurationMeter("Time Elapsed", self.device, ":.4f")
@@ -224,6 +249,14 @@ class Trainer:
         # Load AMP scaler state if available
         if self.optim_conf.amp.enabled and "scaler" in checkpoint:
             self.scaler.load_state_dict(checkpoint["scaler"])
+
+        for p in self.model.parameters():
+            p.requires_grad = False
+        if self.model.segmentation_head is not None:
+            for p in self.model.segmentation_head.parameters():
+                p.requires_grad = True
+        trainable_params = [p for p in self.model.parameters() if p.requires_grad]
+        self.optims = construct_optimizers(self.model, self.optim_conf)  # reuse existing helper
 
     def _setup_device(self, device: str):
         """Sets up the device for training (CPU or CUDA)."""
@@ -633,6 +666,10 @@ class Trainer:
             if data_iter % self.logging_conf.log_freq == 0:
                 progress.display(data_iter)
 
+        # Log trainable parameters
+        trainable = [n for n,p in self.model.named_parameters() if p.requires_grad]
+        logging.info(f"Trainable params: {trainable}")
+
         return True
 
     def _run_steps_on_batch_chunks(
@@ -713,10 +750,7 @@ class Trainer:
         
         return batch
 
-    def _process_batch(self, batch: Mapping):      
-        if self.data_conf.train.common_config.repeat_batch:
-            batch = self._apply_batch_repetition(batch)
-        
+    def _process_batch(self, batch: Mapping):
         # Normalize camera extrinsics and points. The function returns new tensors.
         normalized_extrinsics, normalized_cam_points, normalized_world_points, normalized_depths = \
             normalize_camera_extrinsics_and_points_batch(
@@ -732,6 +766,40 @@ class Trainer:
         batch["cam_points"] = normalized_cam_points
         batch["world_points"] = normalized_world_points
         batch["depths"] = normalized_depths
+
+        # Add segmentation_target from CLIPSeg if not present
+        if (
+            "segmentation_target" not in batch
+            and self.seg_prompts
+            and get_multiclass_segmentation_tensor_mask is not None
+        ):
+            imgs = batch["images"]  # [B,S,3,H,W]
+            B, S, _, H, W = imgs.shape
+            seg_targets = []
+            # Expect batch["seq_name"] to contain per-sample folders or paths
+            seq_names = batch.get("seq_name", [None] * B)
+            for b in range(B):
+                image_folder = seq_names[b] if isinstance(seq_names, (list, tuple)) else seq_names
+                # Fallback: if dataset doesn’t provide a folder, skip
+                if image_folder is None or not isinstance(image_folder, str) or not os.path.isdir(image_folder):
+                    # create empty target to avoid crash; you can handle it in loss
+                    seg_targets.append(torch.zeros(S, H, W, dtype=torch.long))
+                    continue
+                seg_masks = get_multiclass_segmentation_tensor_mask(self.seg_prompts, image_folder)
+                seg_masks = torch.as_tensor(seg_masks)  # [S,H,W] or [S,C,H,W]
+                if seg_masks.dim() == 4:
+                    # [S,C,H0,W0] -> resize to HxW and argmax
+                    seg_masks = F.interpolate(seg_masks, size=(H, W), mode="nearest")
+                    target = seg_masks.argmax(dim=1).long()  # [S,H,W]
+                elif seg_masks.dim() == 3:
+                    # [S,H0,W0] class ids -> resize
+                    seg_masks = seg_masks.unsqueeze(1).float()                     # [S,1,H0,W0]
+                    seg_masks = F.interpolate(seg_masks, size=(H, W), mode="nearest")
+                    target = seg_masks.squeeze(1).long()                           # [S,H,W]
+                else:
+                    raise RuntimeError(f"Unexpected seg_masks shape: {tuple(seg_masks.shape)}")
+                seg_targets.append(target)
+            batch["segmentation_target"] = torch.stack(seg_targets, dim=0)  # [B,S,H,W]
 
         return batch
 
@@ -865,4 +933,24 @@ def get_chunk_from_data(data: Any, chunk_id: int, num_chunks: int) -> Any:
         return [get_chunk_from_data(value, chunk_id, num_chunks) for value in data]
     else:
         return data
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Training Script")
+    # ... existing argument definitions ...
+    parser.add_argument("--single_gpu", action="store_true", help="Run without DDP on one GPU")
+    return parser.parse_args()
+
+args = parse_args()
+
+# --- Distributed Initialization ---
+if args.single_gpu:
+    distributed = False
+else:
+    distributed = True  # existing logic
+
+if distributed:
+    # ...existing init code...
+    pass
+# else skip
 

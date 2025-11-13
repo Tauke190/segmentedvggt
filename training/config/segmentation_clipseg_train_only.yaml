@@ -1,0 +1,81 @@
+defaults:
+  - default_dataset.yaml
+
+exp_name: seg_head_ft_clipseg
+img_size: 518
+num_workers: 4
+seed_value: 42
+accum_steps: 2
+patch_size: 14
+max_img_per_gpu: 48
+max_epochs: 10
+val_epoch_freq: 0          # disables val loop
+
+data:
+  train:
+    _target_: data.dynamic_dataloader.DynamicTorchDataset
+    common_config:
+      img_size: ${img_size}
+      patch_size: ${patch_size}
+    dataset:
+      _target_: data.composed_dataset.ComposedDataset
+      dataset_configs:
+        - _target_: data.datasets.clipseg_multiview.ClipSegMultiViewDataset
+          root: /YOUR/PATH/TO/examples         # contains seqX/images/
+          split: train
+          prompts: ["car","person","road"]
+          img_size: ${img_size}
+          max_views: 8
+          cache_dir: logs/cache
+          cache_masks: true
+
+logging:
+  log_dir: logs
+  log_freq: 10
+  tensorboard_writer:
+    _target_: train_utils.tb_writer.TensorBoardLogger
+    path: ${logging.log_dir}/tensorboard
+  scalar_keys_to_log:
+    train:
+      keys_to_log: [loss_objective, loss_segmentation]
+
+checkpoint:
+  save_dir: logs/${exp_name}/ckpts
+  save_freq: 1
+  resume_checkpoint_path: /YOUR/PATH/TO/base_vggt.pt
+  strict: False
+
+loss:
+  _target_: loss.MultitaskLoss
+  camera: null
+  depth: null
+  point: null
+  track: null
+  segmentation:
+    weight: 1.0
+    type: "ce"
+
+optim:
+  optimizer:
+    _target_: torch.optim.AdamW
+    lr: 1e-4
+    weight_decay: 0.05
+  amp:
+    enabled: True
+    amp_dtype: bfloat16
+
+model:
+  _target_: vggt.models.vggt.VGGT
+  enable_camera: False
+  enable_point: False
+  enable_depth: False
+  enable_track: False
+  enable_segmentation: true
+  num_seg_classes: 3
+
+distributed:
+  backend: gloo
+  broadcast_buffers: True
+
+cuda:
+  allow_tf32: True

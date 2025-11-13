@@ -3,7 +3,6 @@
 #
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
-
 import torch
 import torch.nn.functional as F
 
@@ -14,7 +13,7 @@ from math import ceil, floor
 
 
 @dataclass(eq=False)
-class MultitaskLoss(torch.nn.Module):
+class MultitaskLoss(nn.Module):
     """
     Multi-task loss module that combines different loss types for VGGT.
     
@@ -24,28 +23,19 @@ class MultitaskLoss(torch.nn.Module):
     - Point loss
     - Tracking loss (not cleaned yet, dirty code is at the bottom of this file)
     """
-    def __init__(self, camera=None, depth=None, point=None, track=None, **kwargs):
+    def __init__(self, camera=None, depth=None, point=None, track=None, segmentation=None, **kwargs):
         super().__init__()
         # Loss configuration dictionaries for each task
         self.camera = camera
         self.depth = depth
         self.point = point
         self.track = track
+        self.segmentation = segmentation
 
-    def forward(self, predictions, batch) -> torch.Tensor:
-        """
-        Compute the total multi-task loss.
-        
-        Args:
-            predictions: Dict containing model predictions for different tasks
-            batch: Dict containing ground truth data and masks
-            
-        Returns:
-            Dict containing individual losses and total objective
-        """
-        total_loss = 0
+    def forward(self, predictions, batch):
+        total_loss = 0.0
         loss_dict = {}
-        
+
         # Camera pose loss - if pose encodings are predicted
         if "pose_enc_list" in predictions:
             camera_loss_dict = compute_camera_loss(predictions, batch, **self.camera)   
@@ -72,11 +62,31 @@ class MultitaskLoss(torch.nn.Module):
         # Tracking loss - not cleaned yet, dirty code is at the bottom of this file
         if "track" in predictions:
             raise NotImplementedError("Track loss is not cleaned up yet")
-        
-        loss_dict["objective"] = total_loss
 
+        # Segmentation
+        if self.segmentation is not None and "segmentation_logits" in predictions and "segmentation_target" in batch:
+            seg_kwargs = {k: v for k, v in self.segmentation.items() if k != "weight"}
+            seg_out = compute_segmentation_loss(predictions, batch, **seg_kwargs)
+            w = float(self.segmentation.get("weight", 1.0))
+            loss_dict.update(seg_out)
+            total_loss = total_loss + w * seg_out["loss_segmentation"]
+
+        loss_dict["loss_objective"] = total_loss
         return loss_dict
 
+
+def compute_segmentation_loss(predictions, batch, type="ce"):
+    logits = predictions["segmentation_logits"]  # (B,S,C,H,W) or (B,S,1,H,W)
+    if type == "ce":
+        target = batch["segmentation_target"].long()  # (B,S,H,W)
+        B, S, C, H, W = logits.shape
+        loss = F.cross_entropy(logits.view(B*S, C, H, W), target.view(B*S, H, W))
+    elif type == "bce":
+        target = batch["segmentation_target"].float().unsqueeze(2)  # (B,S,1,H,W)
+        loss = F.binary_cross_entropy_with_logits(logits, target)
+    else:
+        raise ValueError(f"Unknown segmentation loss type: {type}")
+    return {"loss_segmentation": loss}
 
 def compute_camera_loss(
     pred_dict,              # predictions dict, contains pose encodings
@@ -671,7 +681,6 @@ def torch_quantile(
         return out.squeeze()
     else:
         return out.squeeze(dim)
-
     return out
 
 
