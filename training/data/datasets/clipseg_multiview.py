@@ -3,11 +3,11 @@ from typing import List, Optional
 import torch
 from torch.utils.data import Dataset
 import torch.nn.functional as F
+from pathlib import Path
 
-# Add clipseg to path
-clipseg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "clipseg"))
-if clipseg_root not in sys.path:
-    sys.path.append(clipseg_root)
+clipseg_path = str(Path(__file__).resolve().parents[3] / "clipseg")
+if clipseg_path not in sys.path:
+    sys.path.append(clipseg_path)
 
 from clipseg.multiclass_segmentor import get_multiclass_segmentation_tensor_mask
 from vggt.utils.load_fn import load_and_preprocess_images

@@ -45,11 +45,10 @@ from train_utils.normalization import normalize_camera_extrinsics_and_points_bat
 from train_utils.optimizer import construct_optimizers
 
 
-# Add CLIPSeg to PYTHONPATH and import
-import sys
-clipseg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "clipseg"))
-if clipseg_root not in sys.path:
-    sys.path.append(clipseg_root)
+import os, sys
+clipseg_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "clipseg"))
+if clipseg_path not in sys.path:
+    sys.path.append(clipseg_path)
 try:
     from clipseg.multiclass_segmentor import get_multiclass_segmentation_tensor_mask
 except Exception as e:
