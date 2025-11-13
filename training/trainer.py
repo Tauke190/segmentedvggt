@@ -45,6 +45,8 @@ from train_utils.normalization import normalize_camera_extrinsics_and_points_bat
 from train_utils.optimizer import construct_optimizers
 
 import os, sys
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'clipseg')))
 from clipseg.multiclass_segmentor import get_multiclass_segmentation_tensor_mask
 
 
