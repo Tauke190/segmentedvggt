@@ -422,6 +422,45 @@ parser.add_argument(
 )
 
 
+def _load_state_dict_from_any(url_or_path: str):
+    """Load a state dict from a local path or URL and unwrap common wrappers."""
+    if os.path.isfile(url_or_path):
+        state = torch.load(url_or_path, map_location="cpu")
+    else:
+        state = torch.hub.load_state_dict_from_url(url_or_path, map_location="cpu")
+    if isinstance(state, dict) and "state_dict" in state:
+        state = state["state_dict"]
+    # strip module. prefix if present
+    state = { (k[7:] if k.startswith("module.") else k): v for k, v in state.items() }
+    return state
+
+def replace_segmentation_head_from_checkpoint(model: torch.nn.Module, url_or_path: str) -> None:
+    """
+    Replace only the segmentation head parameters of `model` with those from `url_or_path`.
+    Safely skips non-matching keys or shape mismatches.
+    """
+    ckpt = _load_state_dict_from_any(url_or_path)
+    model_sd = model.state_dict()
+    picked = {}
+
+    # Heuristics for segmentation head keys
+    tokens = ("segmentation_head", "seg_head", "segmentation")
+    for k, v in ckpt.items():
+        if k in model_sd and any(t in k for t in tokens):
+            if model_sd[k].shape == v.shape:
+                picked[k] = v
+            else:
+                print(f"[seg-head] Skip shape mismatch: {k}: {v.shape} -> {model_sd[k].shape}")
+
+    if not picked:
+        print("[seg-head] No matching segmentation head keys found in checkpoint.")
+        return
+
+    with torch.no_grad():
+        for k, v in picked.items():
+            model_sd[k].copy_(v)
+    print(f"[seg-head] Replaced {len(picked)} segmentation head tensors from checkpoint.")
+
 def load_with_strict_false(model, url_or_path: str):
     if os.path.isfile(url_or_path):
         state = torch.load(url_or_path, map_location="cpu")
@@ -465,13 +504,13 @@ def main():
     model = VGGT()  # enable_segmentation=True by default in your VGGT
     _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
 
-    ckpt_source = args.checkpoint if args.checkpoint else _URL
-    if args.checkpoint:
-        print(f"Loading custom checkpoint: {ckpt_source}")
-    else:
-        print("Loading default pretrained checkpoint...")
+    print("Loading default pretrained checkpoint...")
+    load_with_strict_false(model, _URL)
 
-    load_with_strict_false(model, ckpt_source)
+    # Optionally replace only the segmentation head from a custom checkpoint
+    if args.checkpoint:
+        print(f"Replacing segmentation head from custom checkpoint: {args.checkpoint}")
+        replace_segmentation_head_from_checkpoint(model, args.checkpoint)
 
     model.eval()
     model = model.to(device)
