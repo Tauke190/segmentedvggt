@@ -416,6 +416,10 @@ parser.add_argument("--mask_sky", action="store_true", help="Apply sky segmentat
 parser.add_argument(
     "--seg_threshold", type=float, default=0.5, help="Threshold for segmentation probability in [0,1]"
 )
+parser.add_argument(
+    "--checkpoint", type=str, default=None,
+    help="Path or URL to a custom VGGT checkpoint. If not set, the default pretrained 1B checkpoint is used."
+)
 
 
 def load_with_strict_false(model, url_or_path: str):
@@ -460,7 +464,14 @@ def main():
     print("Initializing and loading VGGT model...")
     model = VGGT()  # enable_segmentation=True by default in your VGGT
     _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
-    load_with_strict_false(model, _URL)
+
+    ckpt_source = args.checkpoint if args.checkpoint else _URL
+    if args.checkpoint:
+        print(f"Loading custom checkpoint: {ckpt_source}")
+    else:
+        print("Loading default pretrained checkpoint...")
+
+    load_with_strict_false(model, ckpt_source)
 
     model.eval()
     model = model.to(device)
