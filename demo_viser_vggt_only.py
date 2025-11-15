@@ -435,33 +435,6 @@ def _load_state_dict_from_any(url_or_path: str):
     state = { (k[7:] if k.startswith("module.") else k): v for k, v in state.items() }
     return state
 
-def replace_segmentation_head_from_checkpoint(model: torch.nn.Module, url_or_path: str) -> None:
-    """
-    Replace only the segmentation head parameters of `model` with those from `url_or_path`.
-    Safely skips non-matching keys or shape mismatches.
-    """
-    ckpt = _load_state_dict_from_any(url_or_path)
-    model_sd = model.state_dict()
-    picked = {}
-
-    # Heuristics for segmentation head keys
-    tokens = ("segmentation_head", "seg_head", "segmentation")
-    for k, v in ckpt.items():
-        if k in model_sd and any(t in k for t in tokens):
-            if model_sd[k].shape == v.shape:
-                picked[k] = v
-            else:
-                print(f"[seg-head] Skip shape mismatch: {k}: {v.shape} -> {model_sd[k].shape}")
-
-    if not picked:
-        print("[seg-head] No matching segmentation head keys found in checkpoint.")
-        return
-
-    with torch.no_grad():
-        for k, v in picked.items():
-            model_sd[k].copy_(v)
-    print(f"[seg-head] Replaced {len(picked)} segmentation head tensors from checkpoint.")
-
 def load_with_strict_false(model, url_or_path: str):
     if os.path.isfile(url_or_path):
         state = torch.load(url_or_path, map_location="cpu")
@@ -519,9 +492,10 @@ def main():
     # Optionally replace only the segmentation head from a custom checkpoint
     if args.checkpoint:
         print(f"Replacing segmentation head from custom checkpoint: {args.checkpoint}")
-        replace_segmentation_head_from_checkpoint(model, args.checkpoint)
+        checkpoint = torch.load(args.checkpoint, map_location="cpu")
+        model.segmentation_head.load_state_dict(checkpoint["segmentation_head"])
 
-    reinit_segmentation_head()
+    reinit_segmentation_head(model)
     model.eval()
     model = model.to(device)
 
