@@ -513,13 +513,20 @@ def main():
     model = VGGT()  # enable_segmentation=True by default in your VGGT
     _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
 
-    print("Loading default pretrained checkpoint...")
-    load_with_strict_false(model, _URL)
+    # --- Modified logic for loading checkpoint ---
+    if args.checkpoint:
+        print(f"Loading VGGT model from custom checkpoint: {args.checkpoint}")
+        load_with_strict_false(model, args.checkpoint)
+    else:
+        print("Loading default pretrained checkpoint...")
+        load_with_strict_false(model, _URL)
+    # --------------------------------------------
 
     # Optionally replace only the segmentation head from a custom checkpoint
-    if args.checkpoint:
-        print(f"Replacing segmentation head from custom checkpoint: {args.checkpoint}")
-        replace_segmentation_head_from_checkpoint(model, args.checkpoint)
+    # (Remove or comment out this block if you want to load the full model from checkpoint)
+    # if args.checkpoint:
+    #     print(f"Replacing segmentation head from custom checkpoint: {args.checkpoint}")
+    #     replace_segmentation_head_from_checkpoint(model, args.checkpoint)
 
     reinit_segmentation_head(model)
     model.eval()
