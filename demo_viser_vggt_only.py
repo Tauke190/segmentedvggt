@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import torch.nn.functional as F
+import torch.nn as nn
 
 import os
 import glob
@@ -477,6 +478,14 @@ def load_with_strict_false(model, url_or_path: str):
     print("Unexpected keys:", msg.unexpected_keys)
     return msg
 
+def reinit_segmentation_head(model):
+    if model.segmentation_head is not None:
+        for m in model.segmentation_head.modules():
+            if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
 def main():
     """
     Main function for the VGGT demo with viser for 3D visualization.
@@ -512,6 +521,7 @@ def main():
         print(f"Replacing segmentation head from custom checkpoint: {args.checkpoint}")
         replace_segmentation_head_from_checkpoint(model, args.checkpoint)
 
+    reinit_segmentation_head(model)
     model.eval()
     model = model.to(device)
 
