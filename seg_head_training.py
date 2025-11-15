@@ -320,8 +320,12 @@ def main():
         gc.collect()
 
     # Save after all scenes
-    torch.save({"model": model.state_dict()}, args.save_path)
-    print(f"Saved trained weights to {args.save_path}")
+    # Save only the segmentation_head parameters
+    torch.save(
+        {"segmentation_head": model.segmentation_head.state_dict()},
+        args.save_path
+    )
+    print(f"Saved segmentation_head weights to {args.save_path}")
 
     # Optional final inference on last processed scene (if any)
     print("Training complete.")
