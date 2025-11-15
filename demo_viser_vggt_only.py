@@ -489,13 +489,20 @@ def main():
     print("Loading default pretrained checkpoint...")
     load_with_strict_false(model, _URL)
 
+    # reinit_segmentation_head(model)
+
     # Optionally replace only the segmentation head from a custom checkpoint
     if args.checkpoint:
         print(f"Replacing segmentation head from custom checkpoint: {args.checkpoint}")
         checkpoint = torch.load(args.checkpoint, map_location="cpu")
-        model.segmentation_head.load_state_dict(checkpoint["segmentation_head"])
+        result = model.segmentation_head.load_state_dict(checkpoint["segmentation_head"])
+        print("Segmentation head loaded. Missing keys:", result.missing_keys)
+        print("Segmentation head loaded. Unexpected keys:", result.unexpected_keys)
+        if not result.missing_keys and not result.unexpected_keys:
+            print("Segmentation head successfully replaced!")
+        else:
+            print("Segmentation head replacement had issues. See above.")
 
-    reinit_segmentation_head(model)
     model.eval()
     model = model.to(device)
 
