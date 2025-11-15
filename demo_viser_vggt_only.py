@@ -556,6 +556,12 @@ def main():
         predictions["segmentation_logits"] = seg_prob_np
         print("seg_prob (numpy) shape:", seg_prob_np.shape)  # [S,1,H,W]
 
+        # --- Save segmentation probabilities to a txt file ---
+        # Flatten to (S*H*W,) for easier viewing
+        seg_prob_flat = seg_prob_np.flatten()
+        np.savetxt("segmentation_probs.txt", seg_prob_flat, fmt="%.6f")
+        print("Saved segmentation probabilities to segmentation_probs.txt")
+
     if args.use_point_map:
         print("Visualizing 3D points from point map")
     else:
