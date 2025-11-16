@@ -422,19 +422,6 @@ parser.add_argument(
     help="Path or URL to a custom VGGT checkpoint. If not set, the default pretrained 1B checkpoint is used."
 )
 
-
-def _load_state_dict_from_any(url_or_path: str):
-    """Load a state dict from a local path or URL and unwrap common wrappers."""
-    if os.path.isfile(url_or_path):
-        state = torch.load(url_or_path, map_location="cpu")
-    else:
-        state = torch.hub.load_state_dict_from_url(url_or_path, map_location="cpu")
-    if isinstance(state, dict) and "state_dict" in state:
-        state = state["state_dict"]
-    # strip module. prefix if present
-    state = { (k[7:] if k.startswith("module.") else k): v for k, v in state.items() }
-    return state
-
 def load_with_strict_false(model, url_or_path: str):
     if os.path.isfile(url_or_path):
         state = torch.load(url_or_path, map_location="cpu")
