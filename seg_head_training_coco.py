@@ -42,8 +42,8 @@ parser = argparse.ArgumentParser(description="VGGT segmentation head training")
 parser.add_argument("--epochs", type=int, default=5, help="Number of finetuning epochs per scene")
 parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate for finetuning")
 parser.add_argument("--save_path", type=str, default="vggt_seg_finetuned.pt", help="Where to save finetuned weights")
-parser.add_argument("--train_path", type=str, default=TRAIN_PATH,required=True, help="Path to COCO training images directory")
-parser.add_argument("--annotation_path", type=str,default=TRAIN_ANN_FILE, required=True, help="Path to COCO training annotation file")
+parser.add_argument("--train_path", type=str, default=TRAIN_PATH,required=False, help="Path to COCO training images directory")
+parser.add_argument("--annotation_path", type=str,default=TRAIN_ANN_FILE, required=False, help="Path to COCO training annotation file")
 
 # Fixed defaults for training (since CLI args removed)
 DEFAULT_CLIPSEG_PROMPT = "vehicle"
