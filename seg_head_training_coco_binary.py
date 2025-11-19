@@ -236,72 +236,53 @@ def main():
                     plt.savefig(f"seg_pred_vs_gt_batch{batch_idx}_epoch{epoch}.png")
                     plt.close()
 
+                # --- Evaluate on train-eval set every 200 batches ---
+                model.eval()
+                val_correct = 0
+                val_total = 0
+                iou_sum = 0.0
+                iou_count = 0
+                with torch.no_grad():
+                    for eval_images, eval_masks in train_eval_loader:
+                        eval_images = eval_images.to(device)
+                        eval_masks = eval_masks.to(device)
+                        eval_out = model(eval_images)
+                        eval_logits = eval_out["segmentation_logits"]
+                        if eval_logits.dim() == 5 and eval_logits.shape[1] == 1:
+                            eval_logits = eval_logits.squeeze(1)
+                        elif eval_logits.dim() == 5 and eval_logits.shape[1] > 1:
+                            B, S, C, H, W = eval_logits.shape
+                            eval_logits = eval_logits.view(B * S, C, H, W)
+                        if eval_logits.shape[-2:] != eval_masks.shape[-2:]:
+                            eval_masks = F.interpolate(eval_masks.unsqueeze(1).float(), size=eval_logits.shape[-2:], mode="nearest")
+                            eval_masks = eval_masks.squeeze(1).long()
+                        if eval_masks.ndim == 4 and eval_masks.shape[1] == 1:
+                            eval_masks = eval_masks.squeeze(1)
+                        eval_pred = eval_logits.argmax(1)
+                        val_correct += (eval_pred == eval_masks).float().sum().item()
+                        val_total += eval_masks.numel()
+                        for cls in range(2):
+                            pred_inds = (eval_pred == cls)
+                            target_inds = (eval_masks == cls)
+                            intersection = (pred_inds & target_inds).sum().item()
+                            union = (pred_inds | target_inds).sum().item()
+                            if union > 0:
+                                iou_sum += intersection / union
+                                iou_count += 1
+                current_val_acc = val_correct / val_total if val_total > 0 else 0.0
+                current_miou = iou_sum / iou_count if iou_count > 0 else 0.0
+                print(f"[train-eval][batch {batch_idx}] train-eval pixel acc={current_val_acc:.4f} | train-eval mIoU={current_miou:.4f}")
+                wandb.log({
+                    "train_eval_pixel_acc_batch": current_val_acc,
+                    "train_eval_mIoU_batch": current_miou,
+                    "train_eval_batch_idx": batch_idx,
+                    "epoch": epoch
+                })
+                model.train()
+
         print(f"[epoch {epoch}/{args.epochs}] avg train loss={epoch_loss/len(train_loader):.4f}")
 
-        # --- Train-eval loop (was val_loader) ---
-        model.eval()
-        val_loss = 0.0
-        val_correct = 0
-        val_total = 0
-        iou_sum = 0.0
-        iou_count = 0
-        with torch.no_grad():
-            for batch_idx, (images, masks) in enumerate(train_eval_loader):
-                images = images.to(device)
-                masks = masks.to(device)
-                out = model(images)
-                logits = out["segmentation_logits"]
-                if logits.dim() == 5 and logits.shape[1] == 1:
-                    logits = logits.squeeze(1)
-                elif logits.dim() == 5 and logits.shape[1] > 1:
-                    B, S, C, H, W = logits.shape
-                    logits = logits.view(B * S, C, H, W)
-                if logits.shape[-2:] != masks.shape[-2:]:
-                    masks = F.interpolate(masks.unsqueeze(1).float(), size=logits.shape[-2:], mode="nearest")
-                    masks = masks.squeeze(1).long()
-                if masks.ndim == 4 and masks.shape[1] == 1:
-                    masks = masks.squeeze(1)
-                loss = criterion(logits, masks)
-                val_loss += loss.item()
-                pred = logits.argmax(1)
-                val_correct += (pred == masks).float().sum().item()
-                val_total += masks.numel()
-
-                # --- mIoU calculation ---
-                for cls in range(2):  # for each class (background, foreground)
-                    pred_inds = (pred == cls)
-                    target_inds = (masks == cls)
-                    intersection = (pred_inds & target_inds).sum().item()
-                    union = (pred_inds | target_inds).sum().item()
-                    if union > 0:
-                        iou_sum += intersection / union
-                        iou_count += 1
-
-                # Print and log every 200 batches
-                if batch_idx % 200 == 0 and batch_idx > 0:
-                    current_val_acc = val_correct / val_total if val_total > 0 else 0.0
-                    current_miou = iou_sum / iou_count if iou_count > 0 else 0.0
-                    print(f"[train-eval][batch {batch_idx}] train-eval pixel acc={current_val_acc:.4f} | train-eval mIoU={current_miou:.4f}")
-                    wandb.log({
-                        "train_eval_pixel_acc_batch": current_val_acc,
-                        "train_eval_mIoU_batch": current_miou,
-                        "batch_idx": batch_idx,
-                        "epoch": epoch
-                    })
-
-        avg_val_loss = val_loss / len(train_eval_loader)
-        val_acc = val_correct / val_total
-        miou = iou_sum / iou_count if iou_count > 0 else 0.0
-        print(f"[epoch {epoch}/{args.epochs}] avg train-eval loss={avg_val_loss:.4f} | train-eval pixel acc={val_acc:.4f} | train-eval mIoU={miou:.4f}")
-
-        # Log metrics to wandb
-        wandb.log({
-            "epoch": epoch,
-            "train_loss": epoch_loss / len(train_loader),
-            "val_loss": avg_val_loss,
-            "val_pixel_acc": val_acc,
-            "val_mIoU": miou
-        })
+    
 
         # --- Save best model and early stopping ---
         if val_acc > best_val_acc:
