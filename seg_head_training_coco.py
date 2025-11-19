@@ -49,9 +49,6 @@ parser.add_argument("--train_path", type=str, default=TRAIN_PATH,required=False,
 parser.add_argument("--annotation_path", type=str,default=TRAIN_ANN_FILE, required=False, help="Path to COCO training annotation file")
 parser.add_argument("--train_fraction", type=float, default=1.0, help="Fraction of training data to use (0 < x <= 1)")
 
-# Fixed defaults for training (since CLI args removed)
-DEFAULT_CLIPSEG_PROMPT = "vehicle"
-DEFAULT_CLIPSEG_CLASS_INDEX = 0
 
 def load_with_strict_false(model, url_or_path: str):
     if os.path.isfile(url_or_path):
@@ -154,7 +151,11 @@ def main():
 
     print(f"Train set size: {len(train_subset)} | Val set size: {len(val_subset)}")
     print(f"COCO train dataset size: {len(train_dataset)}")
-    print("Number of classes in dataset:", len(train_dataset.cat_id_to_index))
+    if isinstance(train_dataset, Subset):
+        base_dataset = train_dataset.dataset
+    else:
+        base_dataset = train_dataset
+    print("Number of classes in dataset:", len(base_dataset.cat_id_to_index))
 
     criterion = torch.nn.CrossEntropyLoss()
 
@@ -196,7 +197,7 @@ def main():
             epoch_loss += loss.item()
 
             # --- Visualization every 500 batches ---
-            if batch_idx % 500 == 0:
+            if batch_idx % 1000 == 0:
                 with torch.no_grad():
                     # Take the first sample in the batch
                     pred_mask = logits.argmax(1)[0].cpu().numpy().astype(np.uint8)
