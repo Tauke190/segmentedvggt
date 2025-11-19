@@ -186,6 +186,7 @@ def main():
     )
 
     print(f"COCO train dataset size: {len(train_dataset)}")
+    print("Number of classes in dataset:", len(train_dataset.cat_id_to_index))
 
     num_classes = len(train_dataset.cat_id_to_index) + 1  # +1 for background
     model = VGGT(num_seg_classes=num_classes)
@@ -204,7 +205,11 @@ def main():
             out = model(images)
             logits = out["segmentation_logits"]  # [1, 1, 91, 252, 252]
             if logits.dim() == 5 and logits.shape[1] == 1:
-                logits = logits.squeeze(1)  # [1, 91, 252, 252]
+                logits = logits.squeeze(1)  # [B, C, H, W]
+            elif logits.dim() == 5 and logits.shape[1] > 1:
+                # Merge batch and sequence: [B, S, C, H, W] -> [B*S, C, H, W]
+                B, S, C, H, W = logits.shape
+                logits = logits.view(B * S, C, H, W)
 
             # Resize masks if needed to match logits
             if logits.shape[-2:] != masks.shape[-2:]:
