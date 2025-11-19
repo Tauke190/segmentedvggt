@@ -18,6 +18,7 @@ import torch
 from tqdm.auto import tqdm
 import cv2
 import gc
+import matplotlib.pyplot as plt
 
 import sys
 import os
@@ -182,9 +183,9 @@ def coco_collate_fn(batch):
 # -----------------------------
 #  Transforms for image + mask
 # -----------------------------
-def coco_transform(image, mask, size=(252, 252)):
+def coco_transform(image, mask, size=(256, 256)):
     image = image.resize(size, Image.BILINEAR)
-    mask = mask.resize(size, Image.NEAREST)  # <--- mask is resized here
+    mask = mask.resize(size, Image.NEAREST)
     image = T.ToTensor()(image)
     mask = torch.from_numpy(np.array(mask)).long()
     return image, mask
@@ -199,34 +200,31 @@ class COCOSegmentation(Dataset):
         self.ids = list(self.coco.imgs.keys())
         self.transforms = transforms
 
+        # Build category_id to contiguous index mapping
+        cats = self.coco.loadCats(self.coco.getCatIds())
+        self.cat_id_to_index = {cat['id']: i+1 for i, cat in enumerate(cats)}  # +1 to reserve 0 for background
+
     def __len__(self):
         return len(self.ids)
 
     def __getitem__(self, index):
         img_id = self.ids[index]
-
-        # Load image metadata
         img_info = self.coco.loadImgs(img_id)[0]
         img_path = os.path.join(self.img_dir, img_info["file_name"])
-        
-        # Load RGB image
         image = Image.open(img_path).convert("RGB")
 
-        # Load all annotations for this image
         ann_ids = self.coco.getAnnIds(imgIds=img_id, iscrowd=None)
         anns = self.coco.loadAnns(ann_ids)
 
-        # Create empty mask (H x W)
         mask = np.zeros((img_info["height"], img_info["width"]), dtype=np.uint8)
 
-        # Fill mask: category_id per pixel
         for ann in anns:
             m = self.coco.annToMask(ann)
-            mask = np.maximum(mask, m * ann["category_id"])
+            cat_idx = self.cat_id_to_index[ann["category_id"]]
+            mask = np.maximum(mask, m * cat_idx)
 
         mask = Image.fromarray(mask)
 
-        # Apply transform
         if self.transforms:
             image, mask = self.transforms(image, mask)
 
@@ -264,7 +262,7 @@ def main():
 
     train_loader = DataLoader(
         train_dataset,
-        batch_size=1,  # <-- changed from 4 to 1
+        batch_size=8,  # <-- changed from 4 to 1
         shuffle=True,
         num_workers=4,
         pin_memory=True
@@ -272,7 +270,8 @@ def main():
 
     print(f"COCO train dataset size: {len(train_dataset)}")
 
-    num_classes = 91  # COCO has 80 classes, but mask values can go up to 90
+    num_classes = len(train_dataset.cat_id_to_index) + 1  # +1 for background
+    model = VGGT(num_seg_classes=num_classes)
 
     criterion = torch.nn.CrossEntropyLoss()
 
@@ -305,11 +304,33 @@ def main():
                 print("masks.shape:", masks.shape)    # should be [B, H, W]
 
             loss = criterion(logits, masks)
-            loss.backward()
-            optimizer.step()
-            epoch_loss += loss.item()
-            if batch_idx % 50 == 0:
-                print(f"  [batch {batch_idx}] loss={loss.item():.4f}")
+
+            # --- Visualization every 500 batches ---
+            if batch_idx % 500 == 0:
+                with torch.no_grad():
+                    # Take the first sample in the batch
+                    pred_mask = logits.argmax(1)[0].cpu().numpy().astype(np.uint8)
+                    gt_mask = masks[0].cpu().numpy().astype(np.uint8)
+                    img = images[0].cpu()
+                    # Convert image tensor to PIL
+                    img_pil = T.ToPILImage()(img)
+                    # Plot
+                    plt.figure(figsize=(12, 4))
+                    plt.subplot(1, 3, 1)
+                    plt.imshow(img_pil)
+                    plt.title("Image")
+                    plt.axis("off")
+                    plt.subplot(1, 3, 2)
+                    plt.imshow(gt_mask, cmap="nipy_spectral")
+                    plt.title("GT Mask")
+                    plt.axis("off")
+                    plt.subplot(1, 3, 3)
+                    plt.imshow(pred_mask, cmap="nipy_spectral")
+                    plt.title("Predicted Mask")
+                    plt.axis("off")
+                    plt.tight_layout()
+                    plt.savefig(f"seg_pred_vs_gt_batch{batch_idx}_epoch{epoch}.png")
+                    plt.close()
 
         print(f"[epoch {epoch}/{args.epochs}] avg loss={epoch_loss/len(train_loader):.4f}")
 
