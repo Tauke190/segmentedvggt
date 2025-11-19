@@ -88,4 +88,18 @@ if __name__ == "__main__":
     for images, masks in train_loader:
         print("Images batch:", images.shape)  # [B, 3, H, W]
         print("Masks batch:", masks.shape)    # [B, H, W]
+
+        # Save the first image and mask in the batch
+        img = images[0]
+        mask = masks[0]
+
+        # Convert tensor to PIL Image and save
+        img_pil = T.ToPILImage()(img)
+        img_pil.save("sample_image.png")
+
+        # Convert mask to uint8 and save as PNG
+        mask_pil = Image.fromarray(mask.cpu().numpy().astype(np.uint8))
+        mask_pil.save("sample_mask.png")
+
+        print("Saved sample_image.png and sample_mask.png")
         break
