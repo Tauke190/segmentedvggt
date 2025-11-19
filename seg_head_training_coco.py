@@ -288,7 +288,13 @@ def main():
             logits = torch.cat([o["segmentation_logits"] for o in outputs], dim=0)
             # Resize masks if needed to match logits
             if logits.shape[-2:] != masks.shape[-2:]:
-                masks = F.interpolate(masks.unsqueeze(1).float(), size=logits.shape[-2:], mode="nearest").squeeze(1).long()
+                masks = F.interpolate(masks.unsqueeze(1).float(), size=logits.shape[-2:], mode="nearest")
+                masks = masks.squeeze(1).long()  # <-- always squeeze channel
+
+            # Always ensure masks is [B, H, W] before loss
+            if masks.ndim == 4 and masks.shape[1] == 1:
+                masks = masks.squeeze(1)
+
             loss = criterion(logits, masks)
             loss.backward()
             optimizer.step()
