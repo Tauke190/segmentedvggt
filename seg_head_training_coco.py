@@ -27,7 +27,6 @@ from visual_util import segment_sky, download_file_from_url
 from vggt.models.vggt import VGGT
 from vggt.utils.load_fn import load_and_preprocess_images
 from vggt.utils.pose_enc import pose_encoding_to_extri_intri
-from torchvision.datasets import CocoSegmentation
 from torch.utils.data import DataLoader
 import torchvision.transforms as T
 from PIL import Image
