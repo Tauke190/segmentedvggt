@@ -298,8 +298,8 @@ def main():
         
         # Debugging shapes
         print("images.shape:", images.shape)
-        print("logits.shape:", logits.shape)
-        print("masks.shape:", masks.shape)
+        print("logits.shape:", logits.shape)  # should be [B, C, H, W]
+        print("masks.shape:", masks.shape)    # should be [B, H, W]
 
         print(f"[epoch {epoch}/{args.epochs}] avg loss={epoch_loss/len(train_loader):.4f}")
 
