@@ -31,7 +31,7 @@ from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 from torch.utils.data import DataLoader, Dataset
 import torchvision.transforms as T
 from PIL import Image
-from pycocotools.coco import COCO
+from dataset import COCOSegmentation
 
 def save_point_cloud_as_ply(filename, points, colors):
     """
@@ -128,49 +128,6 @@ def load_with_strict_false(model, url_or_path: str):
     print("Unexpected keys:", msg.unexpected_keys)
     return msg
 
-# --- helper: build GT masks from CLIPSeg for given folder and prompts ---
-def build_clipseg_gt_masks(image_folder: str, target_hw, prompt: str, class_index: int, device: str) -> torch.Tensor:
-    """
-    Returns a tensor of shape [1, S, 1, H, W] with binary masks aligned to model input size.
-    """
-
-    # Allow comma-separated prompts -> list
-    prompt_arg = [p.strip() for p in prompt.split(",")] if isinstance(prompt, str) else prompt
-
-    # get_multiclass_segmentation_tensor_mask(prompt, image_folder) is expected to return
-    # a tensor shaped [S, H, W] for single prompt, or [S, C, H, W] for multiple prompts/classes.
-    seg_masks = get_multiclass_segmentation_tensor_mask(prompt_arg, image_folder)  # torch.Tensor
-    if not torch.is_tensor(seg_masks):
-        seg_masks = torch.as_tensor(seg_masks)
-
-    # Normalize dimensions to [S, C, H, W]
-    if seg_masks.ndim == 3:
-        # [S, H, W] -> [S, 1, H, W]
-        seg_masks = seg_masks.unsqueeze(1)
-    elif seg_masks.ndim == 4:
-        # choose class/channel if multi-class
-        if seg_masks.shape[1] > 1:
-            seg_masks = seg_masks[:, class_index:class_index+1, ...]
-    else:
-        raise ValueError(f"Unexpected CLIPSeg mask shape: {tuple(seg_masks.shape)}")
-
-    # Convert to float, threshold to binary if not already
-    seg_masks = seg_masks.float()
-    # If values are not {0,1}, threshold at 0.5
-    with torch.no_grad():
-        if seg_masks.max() > 1.0 or seg_masks.min() < 0.0:
-            seg_masks = (seg_masks - seg_masks.min()) / (seg_masks.max() - seg_masks.min() + 1e-6)
-        seg_masks = (seg_masks >= 0.5).float()
-
-    # Resize to target HxW using nearest to keep binary labels
-    Ht, Wt = target_hw
-    seg_masks = F.interpolate(seg_masks, size=(Ht, Wt), mode="nearest")  # [S,1,Ht,Wt]
-
-    # Add batch and return [1,S,1,H,W] on device
-    return seg_masks.unsqueeze(0).to(device)
-
-
-
 def coco_collate_fn(batch):
     # batch: list of (image, target) tuples
     images = [item[0] for item in batch]
@@ -189,46 +146,6 @@ def coco_transform(image, mask, size=(256, 256)):
     image = T.ToTensor()(image)
     mask = torch.from_numpy(np.array(mask)).long()
     return image, mask
-
-# ------------------------------------
-#   COCO Semantic Segmentation Dataset
-# ------------------------------------
-class COCOSegmentation(Dataset):
-    def __init__(self, img_dir, ann_file, transforms=None):
-        self.img_dir = img_dir
-        self.coco = COCO(ann_file)
-        self.ids = list(self.coco.imgs.keys())
-        self.transforms = transforms
-
-        # Build category_id to contiguous index mapping
-        cats = self.coco.loadCats(self.coco.getCatIds())
-        self.cat_id_to_index = {cat['id']: i+1 for i, cat in enumerate(cats)}  # +1 to reserve 0 for background
-
-    def __len__(self):
-        return len(self.ids)
-
-    def __getitem__(self, index):
-        img_id = self.ids[index]
-        img_info = self.coco.loadImgs(img_id)[0]
-        img_path = os.path.join(self.img_dir, img_info["file_name"])
-        image = Image.open(img_path).convert("RGB")
-
-        ann_ids = self.coco.getAnnIds(imgIds=img_id, iscrowd=None)
-        anns = self.coco.loadAnns(ann_ids)
-
-        mask = np.zeros((img_info["height"], img_info["width"]), dtype=np.uint8)
-
-        for ann in anns:
-            m = self.coco.annToMask(ann)
-            cat_idx = self.cat_id_to_index[ann["category_id"]]
-            mask = np.maximum(mask, m * cat_idx)
-
-        mask = Image.fromarray(mask)
-
-        if self.transforms:
-            image, mask = self.transforms(image, mask)
-
-        return image, mask
 
 def main():
     args = parser.parse_args()
