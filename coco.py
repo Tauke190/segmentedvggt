@@ -68,7 +68,7 @@ class COCOSegmentation(Dataset):
 # ------------------------
 if __name__ == "__main__":
     train_img_dir = "/home/av354855/data/datasets/coco/train2017"
-    train_ann_file = "/home/av354855/data/datasets/coco/train2017/annotations/instances_train2017.json"
+    train_ann_file = "/home/av354855/data/datasets/coco/annotations/instances_train2017.json"
 
     train_dataset = COCOSegmentation(
         img_dir=train_img_dir,
