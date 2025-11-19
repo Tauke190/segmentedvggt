@@ -207,7 +207,7 @@ def main():
             optimizer.step()
             epoch_loss += loss.item()
 
-            # --- Visualization every 500 batches ---
+            # --- Visualization every 200 batches ---
             if batch_idx % 200 == 0:
                 with torch.no_grad():
                     print(f"[epoch {epoch}][batch {batch_idx}] batch loss={loss.item():.4f}")
@@ -246,7 +246,7 @@ def main():
         iou_sum = 0.0
         iou_count = 0
         with torch.no_grad():
-            for images, masks in train_eval_loader:
+            for batch_idx, (images, masks) in enumerate(train_eval_loader):
                 images = images.to(device)
                 masks = masks.to(device)
                 out = model(images)
@@ -276,6 +276,18 @@ def main():
                     if union > 0:
                         iou_sum += intersection / union
                         iou_count += 1
+
+                # Print and log every 200 batches
+                if batch_idx % 200 == 0 and batch_idx > 0:
+                    current_val_acc = val_correct / val_total if val_total > 0 else 0.0
+                    current_miou = iou_sum / iou_count if iou_count > 0 else 0.0
+                    print(f"[train-eval][batch {batch_idx}] train-eval pixel acc={current_val_acc:.4f} | train-eval mIoU={current_miou:.4f}")
+                    wandb.log({
+                        "train_eval_pixel_acc_batch": current_val_acc,
+                        "train_eval_mIoU_batch": current_miou,
+                        "train_eval_batch_idx": batch_idx,
+                        "epoch": epoch
+                    })
 
         avg_val_loss = val_loss / len(train_eval_loader)
         val_acc = val_correct / val_total
