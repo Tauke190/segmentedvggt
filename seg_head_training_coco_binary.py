@@ -7,27 +7,15 @@
 import torch.nn.functional as F
 
 import os
-import glob
-import time
-import threading
 import argparse
-from typing import List, Optional
 import random
 import numpy as np
 import torch
 from tqdm.auto import tqdm
-import cv2
 import gc
 import matplotlib.pyplot as plt
-
-import sys
 import os
-import onnxruntime
-from clipseg.multiclass_segmentor import get_multiclass_segmentation_tensor_mask, visualize_tensor
-from visual_util import segment_sky, download_file_from_url
 from vggt.models.vggt import VGGT
-from vggt.utils.load_fn import load_and_preprocess_images
-from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 from torch.utils.data import DataLoader, Dataset
 import torchvision.transforms as T
 from PIL import Image
@@ -35,17 +23,20 @@ from dataset import COCOSegmentation
 from torch.utils.data import Subset
 import wandb
 
-
 TRAIN_PATH = "/home/av354855/data/datasets/coco/train2017"
 TRAIN_ANN_FILE = "/home/av354855/data/datasets/coco/annotations/instances_train2017.json"
+VAL_PATH = "/home/av354855/data/datasets/coco/val2017"
+VAL_ANN_FILE = "/home/av354855/data/datasets/coco/annotations/instances_val2017.json"
 
 parser = argparse.ArgumentParser(description="VGGT segmentation head training")
 parser.add_argument("--epochs", type=int, default=50, help="Number of finetuning epochs per scene")
 parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate for finetuning")
 parser.add_argument("--save_path", type=str, default="vggt_seg_finetuned.pt", help="Where to save finetuned weights")
-parser.add_argument("--train_path", type=str, default=TRAIN_PATH,required=False, help="Path to COCO training images directory")
-parser.add_argument("--annotation_path", type=str,default=TRAIN_ANN_FILE, required=False, help="Path to COCO training annotation file")
+parser.add_argument("--train_path", type=str, default=TRAIN_PATH, required=False, help="Path to COCO training images directory")
+parser.add_argument("--train_annotation_path", type=str, default=TRAIN_ANN_FILE, required=False, help="Path to COCO training annotation file")
 parser.add_argument("--train_fraction", type=float, default=1.0, help="Fraction of training data to use (0 < x <= 1)")
+parser.add_argument("--val_path", type=str, default=VAL_PATH, required=False, help="Path to COCO validation images directory")
+parser.add_argument("--val_annotation_path", type=str, default=VAL_ANN_FILE, required=False, help="Path to COCO validation annotation file")
 
 
 def load_with_strict_false(model, url_or_path: str):
@@ -118,16 +109,16 @@ def main():
         train_dataset = Subset(train_dataset, indices)
         print(f"Using a subset of the training data: {subset_len}/{total_len} samples")
 
-    # --- NEW: Split into train/val (90%/10%) ---
+    # --- Split into train/train-eval (90%/10%) ---
     total_len = len(train_dataset)
-    val_len = int(0.1 * total_len)
-    train_len = total_len - val_len
+    train_eval_len = int(0.1 * total_len)
+    train_len = total_len - train_eval_len
     indices = list(range(total_len))
     random.shuffle(indices)
     train_indices = indices[:train_len]
-    val_indices = indices[train_len:]
+    train_eval_indices = indices[train_len:]
     train_subset = Subset(train_dataset, train_indices)
-    val_subset = Subset(train_dataset, val_indices)
+    train_eval_subset = Subset(train_dataset, train_eval_indices)
 
     train_loader = DataLoader(
         train_subset,
@@ -136,15 +127,29 @@ def main():
         num_workers=4,
         pin_memory=True
     )
-    val_loader = DataLoader(
-        val_subset,
+    train_eval_loader = DataLoader(
+        train_eval_subset,
         batch_size=8,
         shuffle=False,
         num_workers=4,
         pin_memory=True
     )
 
-    print(f"Train set size: {len(train_subset)} | Val set size: {len(val_subset)}")
+    # --- True validation loader from COCO val2017 ---
+    val_dataset = COCOSegmentation(
+        img_dir=VAL_PATH,
+        ann_file=VAL_ANN_FILE,
+        transforms=lambda img, msk: coco_transform(img, msk, size=(252, 252))
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=8,
+        shuffle=False,
+        num_workers=4,
+        pin_memory=True
+    )
+
+    print(f"Train set size: {len(train_subset)} | Train-eval set size: {len(train_eval_subset)} | Val set size: {len(val_dataset)}")
     print(f"COCO train dataset size: {len(train_dataset)}")
     if isinstance(train_dataset, Subset):
         base_dataset = train_dataset.dataset
@@ -233,7 +238,7 @@ def main():
 
         print(f"[epoch {epoch}/{args.epochs}] avg train loss={epoch_loss/len(train_loader):.4f}")
 
-        # --- Validation loop ---
+        # --- Train-eval loop (was val_loader) ---
         model.eval()
         val_loss = 0.0
         val_correct = 0
@@ -241,7 +246,7 @@ def main():
         iou_sum = 0.0
         iou_count = 0
         with torch.no_grad():
-            for images, masks in val_loader:
+            for images, masks in train_eval_loader:
                 images = images.to(device)
                 masks = masks.to(device)
                 out = model(images)
@@ -272,10 +277,10 @@ def main():
                         iou_sum += intersection / union
                         iou_count += 1
 
-        avg_val_loss = val_loss / len(val_loader)
+        avg_val_loss = val_loss / len(train_eval_loader)
         val_acc = val_correct / val_total
         miou = iou_sum / iou_count if iou_count > 0 else 0.0
-        print(f"[epoch {epoch}/{args.epochs}] avg val loss={avg_val_loss:.4f} | val pixel acc={val_acc:.4f} | val mIoU={miou:.4f}")
+        print(f"[epoch {epoch}/{args.epochs}] avg train-eval loss={avg_val_loss:.4f} | train-eval pixel acc={val_acc:.4f} | train-eval mIoU={miou:.4f}")
 
         # Log metrics to wandb
         wandb.log({
@@ -311,6 +316,55 @@ def main():
     print(f"Best validation accuracy: {best_val_acc:.4f} at epoch {best_epoch}")
     print(f"Best model weights saved to {args.save_path}")
     print("Training complete.")
+
+    # --- Full validation on COCO val2017 at the end ---
+    print("Running full validation on COCO val2017...")
+    model.eval()
+    val_loss = 0.0
+    val_correct = 0
+    val_total = 0
+    iou_sum = 0.0
+    iou_count = 0
+    with torch.no_grad():
+        for images, masks in val_loader:
+            images = images.to(device)
+            masks = masks.to(device)
+            out = model(images)
+            logits = out["segmentation_logits"]
+            if logits.dim() == 5 and logits.shape[1] == 1:
+                logits = logits.squeeze(1)
+            elif logits.dim() == 5 and logits.shape[1] > 1:
+                B, S, C, H, W = logits.shape
+                logits = logits.view(B * S, C, H, W)
+            if logits.shape[-2:] != masks.shape[-2:]:
+                masks = F.interpolate(masks.unsqueeze(1).float(), size=logits.shape[-2:], mode="nearest")
+                masks = masks.squeeze(1).long()
+            if masks.ndim == 4 and masks.shape[1] == 1:
+                masks = masks.squeeze(1)
+            loss = criterion(logits, masks)
+            val_loss += loss.item()
+            pred = logits.argmax(1)
+            val_correct += (pred == masks).float().sum().item()
+            val_total += masks.numel()
+            for cls in range(2):
+                pred_inds = (pred == cls)
+                target_inds = (masks == cls)
+                intersection = (pred_inds & target_inds).sum().item()
+                union = (pred_inds | target_inds).sum().item()
+                if union > 0:
+                    iou_sum += intersection / union
+                    iou_count += 1
+
+    avg_val_loss = val_loss / len(val_loader)
+    val_acc = val_correct / val_total
+    miou = iou_sum / iou_count if iou_count > 0 else 0.0
+    print(f"[FINAL VALIDATION] avg val loss={avg_val_loss:.4f} | val pixel acc={val_acc:.4f} | val mIoU={miou:.4f}")
+    wandb.log({
+        "final_val_loss": avg_val_loss,
+        "final_val_pixel_acc": val_acc,
+        "final_val_mIoU": miou
+    })
+
 
 if __name__ == "__main__":
     main()
