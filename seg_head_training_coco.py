@@ -238,7 +238,7 @@ def main():
     print(f"Using device: {device}")
 
     print("Initializing and loading VGGT model...")
-    model = VGGT()
+    model = VGGT(num_seg_classes=91)  # <-- Ensure correct number of classes
     _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
     load_with_strict_false(model, _URL)
     model = model.to(device)
@@ -259,7 +259,7 @@ def main():
     train_dataset = COCOSegmentation(
         img_dir=train_img_dir,
         ann_file=train_ann_file,
-        transforms=lambda img, msk: coco_transform(img, msk, size=(252, 252))  # <-- changed
+        transforms=lambda img, msk: coco_transform(img, msk, size=(252, 252))
     )
 
     train_loader = DataLoader(
@@ -272,7 +272,6 @@ def main():
 
     print(f"COCO train dataset size: {len(train_dataset)}")
 
-    # Number of classes in COCO (including background)
     num_classes = 91  # COCO has 80 classes, but mask values can go up to 90
 
     criterion = torch.nn.CrossEntropyLoss()
@@ -284,16 +283,24 @@ def main():
             images = images.to(device)
             masks = masks.to(device)  # [B, H, W], dtype long
             optimizer.zero_grad(set_to_none=True)
-            outputs = [model(img.unsqueeze(0)) for img in images]
-            logits = torch.cat([o["segmentation_logits"] for o in outputs], dim=0)
+
+            out = model(images)
+            logits = out["segmentation_logits"]  # [B, C, H, W]
+
             # Resize masks if needed to match logits
             if logits.shape[-2:] != masks.shape[-2:]:
                 masks = F.interpolate(masks.unsqueeze(1).float(), size=logits.shape[-2:], mode="nearest")
-                masks = masks.squeeze(1).long()  # <-- always squeeze channel
+                masks = masks.squeeze(1).long()
 
             # Always ensure masks is [B, H, W] before loss
             if masks.ndim == 4 and masks.shape[1] == 1:
                 masks = masks.squeeze(1)
+
+            # Debugging shapes
+            if batch_idx == 0:
+                print("images.shape:", images.shape)
+                print("logits.shape:", logits.shape)  # should be [B, C, H, W]
+                print("masks.shape:", masks.shape)    # should be [B, H, W]
 
             loss = criterion(logits, masks)
             loss.backward()
@@ -301,11 +308,6 @@ def main():
             epoch_loss += loss.item()
             if batch_idx % 50 == 0:
                 print(f"  [batch {batch_idx}] loss={loss.item():.4f}")
-        
-        # Debugging shapes
-        print("images.shape:", images.shape)
-        print("logits.shape:", logits.shape)  # should be [B, C, H, W]
-        print("masks.shape:", masks.shape)    # should be [B, H, W]
 
         print(f"[epoch {epoch}/{args.epochs}] avg loss={epoch_loss/len(train_loader):.4f}")
 
