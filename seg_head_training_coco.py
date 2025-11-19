@@ -33,80 +33,17 @@ import torchvision.transforms as T
 from PIL import Image
 from dataset import COCOSegmentation
 
-def save_point_cloud_as_ply(filename, points, colors):
-    """
-    Save a point cloud to a PLY file.
 
-    Args:
-        filename (str): Output file path.
-        points (np.ndarray): (N, 3) array of XYZ coordinates.
-        colors (np.ndarray): (N, 3) array of RGB colors (uint8).
-    """
-    assert points.shape[0] == colors.shape[0]
-    with open(filename, 'w') as f:
-        f.write("ply\n")
-        f.write("format ascii 1.0\n")
-        f.write(f"element vertex {points.shape[0]}\n")
-        f.write("property float x\nproperty float y\nproperty float z\n")
-        f.write("property uchar red\nproperty uchar green\nproperty uchar blue\n")
-        f.write("end_header\n")
-        for p, c in zip(points, colors):
-            f.write(f"{p[0]} {p[1]} {p[2]} {c[0]} {c[1]} {c[2]}\n")
-# Helper functions for sky segmentation
-def apply_sky_segmentation(conf: np.ndarray, image_folder: str) -> np.ndarray:
-    """
-    Apply sky segmentation to confidence scores.
+TRAIN_PATH = "/home/av354855/data/datasets/coco/train2017"
+TRAIN_ANN_FILE = "/home/av354855/data/datasets/coco/annotations/instances_train2017.json"
 
-    Args:
-        conf (np.ndarray): Confidence scores with shape (S, H, W)
-        image_folder (str): Path to the folder containing input images
-
-    Returns:
-        np.ndarray: Updated confidence scores with sky regions masked out
-    """
-    S, H, W = conf.shape
-    sky_masks_dir = image_folder.rstrip("/") + "_sky_masks"
-    os.makedirs(sky_masks_dir, exist_ok=True)
-
-    # Download skyseg.onnx if it doesn't exist
-    if not os.path.exists("skyseg.onnx"):
-        print("Downloading skyseg.onnx...")
-        download_file_from_url("https://huggingface.co/JianyuanWang/skyseg/resolve/main/skyseg.onnx", "skyseg.onnx")
-
-    skyseg_session = onnxruntime.InferenceSession("skyseg.onnx")
-    image_files = sorted(glob.glob(os.path.join(image_folder, "*")))
-    sky_mask_list = []
-
-    print("Generating sky masks...")
-    for i, image_path in enumerate(tqdm(image_files[:S])):  # Limit to the number of images in the batch
-        image_name = os.path.basename(image_path)
-        mask_filepath = os.path.join(sky_masks_dir, image_name)
-
-        if os.path.exists(mask_filepath):
-            sky_mask = cv2.imread(mask_filepath, cv2.IMREAD_GRAYSCALE)
-        else:
-            sky_mask = segment_sky(image_path, skyseg_session, mask_filepath)
-
-        # Resize mask to match H×W if needed
-        if sky_mask.shape[0] != H or sky_mask.shape[1] != W:
-            sky_mask = cv2.resize(sky_mask, (W, H))
-
-        sky_mask_list.append(sky_mask)
-
-    # Convert list to numpy array with shape S×H×W
-    sky_mask_array = np.array(sky_mask_list)
-    # Apply sky mask to confidence scores
-    sky_mask_binary = (sky_mask_array > 0.1).astype(np.float32)
-    conf = conf * sky_mask_binary
-
-    print("Sky segmentation applied successfully")
-    return conf
 
 parser = argparse.ArgumentParser(description="VGGT segmentation head training")
 parser.add_argument("--epochs", type=int, default=5, help="Number of finetuning epochs per scene")
 parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate for finetuning")
 parser.add_argument("--save_path", type=str, default="vggt_seg_finetuned.pt", help="Where to save finetuned weights")
-parser.add_argument("--viz_clipseg_masks", action="store_true", help="Save a visualization of CLIPSeg masks")
+parser.add_argument("--train_path", type=str, default=TRAIN_PATH,required=True, help="Path to COCO training images directory")
+parser.add_argument("--annotation_path", type=str,default=TRAIN_ANN_FILE, required=True, help="Path to COCO training annotation file")
 
 # Fixed defaults for training (since CLI args removed)
 DEFAULT_CLIPSEG_PROMPT = "vehicle"
@@ -168,8 +105,8 @@ def main():
     optimizer = torch.optim.AdamW(model.segmentation_head.parameters(), lr=args.lr)
     print(f"Optimizer initialized (lr={args.lr})")
 
-    train_img_dir = "/home/av354855/data/datasets/coco/train2017"
-    train_ann_file = "/home/av354855/data/datasets/coco/annotations/instances_train2017.json"
+    train_img_dir = args.train_path
+    train_ann_file = args.annotation_path
 
     train_dataset = COCOSegmentation(
         img_dir=train_img_dir,
@@ -179,7 +116,7 @@ def main():
 
     train_loader = DataLoader(
         train_dataset,
-        batch_size=2, 
+        batch_size=1, 
         shuffle=True,
         num_workers=4,
         pin_memory=True
