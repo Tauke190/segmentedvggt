@@ -284,10 +284,8 @@ def main():
             images = images.to(device)
             masks = masks.to(device)  # [B, H, W], dtype long
             optimizer.zero_grad(set_to_none=True)
-            out = model(images)
-            if "segmentation_logits" not in out:
-                raise RuntimeError("Model did not produce 'segmentation_logits'.")
-            logits = out["segmentation_logits"]  # [B, num_classes, H, W]
+            outputs = [model(img.unsqueeze(0)) for img in images]
+            logits = torch.cat([o["segmentation_logits"] for o in outputs], dim=0)
             # Resize masks if needed to match logits
             if logits.shape[-2:] != masks.shape[-2:]:
                 masks = F.interpolate(masks.unsqueeze(1).float(), size=logits.shape[-2:], mode="nearest").squeeze(1).long()
@@ -297,6 +295,12 @@ def main():
             epoch_loss += loss.item()
             if batch_idx % 50 == 0:
                 print(f"  [batch {batch_idx}] loss={loss.item():.4f}")
+        
+        # Debugging shapes
+        print("images.shape:", images.shape)
+        print("logits.shape:", logits.shape)
+        print("masks.shape:", masks.shape)
+
         print(f"[epoch {epoch}/{args.epochs}] avg loss={epoch_loss/len(train_loader):.4f}")
 
         if torch.cuda.is_available():
