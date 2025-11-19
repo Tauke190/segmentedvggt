@@ -106,10 +106,11 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                     if feat.dim() == 5:
                         B, S, C, H, W = feat.shape
                         feat = feat.view(B * S, C, H, W)
-                        seg_logits = self.segmentation_head(feat)
-                        seg_logits = seg_logits.view(B, S, -1, seg_logits.shape[-2], seg_logits.shape[-1])
-                    else:
-                        seg_logits = self.segmentation_head(feat)
+                    elif feat.dim() == 4 and feat.shape[1] != model.segmentation_head.in_channels:
+                        # If shape is [B, H, W, C], permute to [B, C, H, W]
+                        feat = feat.permute(0, 3, 1, 2)
+                    # Now feat should be [B, C, H, W]
+                    seg_logits = self.segmentation_head(feat)
                     predictions["segmentation_logits"] = seg_logits  # [B,S,C,H,W] or [B,C,H,W]
                 else:
                     seg_logits, _ = self.segmentation_head(
@@ -136,4 +137,6 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
             predictions["images"] = images  # store the images for visualization during inference
 
         return predictions
+
+        print("Shape before segmentation head:", feat.shape)
 
