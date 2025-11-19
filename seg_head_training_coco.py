@@ -285,7 +285,9 @@ def main():
             optimizer.zero_grad(set_to_none=True)
 
             out = model(images)
-            logits = out["segmentation_logits"]  # [B, C, H, W]
+            logits = out["segmentation_logits"]  # [1, 1, 91, 252, 252]
+            if logits.dim() == 5 and logits.shape[1] == 1:
+                logits = logits.squeeze(1)  # [1, 91, 252, 252]
 
             # Resize masks if needed to match logits
             if logits.shape[-2:] != masks.shape[-2:]:
