@@ -12,6 +12,7 @@ import time
 import threading
 import argparse
 from typing import List, Optional
+import random
 
 import numpy as np
 import torch
@@ -32,6 +33,8 @@ from torch.utils.data import DataLoader, Dataset
 import torchvision.transforms as T
 from PIL import Image
 from dataset import COCOSegmentation
+from torch.utils.data import Subset
+
 
 
 TRAIN_PATH = "/home/av354855/data/datasets/coco/train2017"
@@ -39,11 +42,12 @@ TRAIN_ANN_FILE = "/home/av354855/data/datasets/coco/annotations/instances_train2
 
 
 parser = argparse.ArgumentParser(description="VGGT segmentation head training")
-parser.add_argument("--epochs", type=int, default=5, help="Number of finetuning epochs per scene")
+parser.add_argument("--epochs", type=int, default=50, help="Number of finetuning epochs per scene")
 parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate for finetuning")
 parser.add_argument("--save_path", type=str, default="vggt_seg_finetuned.pt", help="Where to save finetuned weights")
 parser.add_argument("--train_path", type=str, default=TRAIN_PATH,required=False, help="Path to COCO training images directory")
 parser.add_argument("--annotation_path", type=str,default=TRAIN_ANN_FILE, required=False, help="Path to COCO training annotation file")
+parser.add_argument("--train_fraction", type=float, default=1.0, help="Fraction of training data to use (0 < x <= 1)")
 
 # Fixed defaults for training (since CLI args removed)
 DEFAULT_CLIPSEG_PROMPT = "vehicle"
@@ -90,7 +94,7 @@ def main():
     print(f"Using device: {device}")
 
     print("Initializing and loading VGGT model...")
-    model = VGGT(num_seg_classes=81)  # <-- Ensure correct number of classes
+    model = VGGT(num_seg_classes=81)
     _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
     load_with_strict_false(model, _URL)
     model = model.to(device)
@@ -114,14 +118,41 @@ def main():
         transforms=lambda img, msk: coco_transform(img, msk, size=(252, 252))
     )
 
+    # --- NEW: Subsample the dataset if train_fraction < 1.0 ---
+    if args.train_fraction < 1.0:
+        total_len = len(train_dataset)
+        subset_len = int(total_len * args.train_fraction)
+        indices = random.sample(range(total_len), subset_len)
+        train_dataset = Subset(train_dataset, indices)
+        print(f"Using a subset of the training data: {subset_len}/{total_len} samples")
+
+    # --- NEW: Split into train/val (90%/10%) ---
+    total_len = len(train_dataset)
+    val_len = int(0.1 * total_len)
+    train_len = total_len - val_len
+    indices = list(range(total_len))
+    random.shuffle(indices)
+    train_indices = indices[:train_len]
+    val_indices = indices[train_len:]
+    train_subset = Subset(train_dataset, train_indices)
+    val_subset = Subset(train_dataset, val_indices)
+
     train_loader = DataLoader(
-        train_dataset,
-        batch_size=1, 
+        train_subset,
+        batch_size=4, 
         shuffle=True,
         num_workers=4,
         pin_memory=True
     )
+    val_loader = DataLoader(
+        val_subset,
+        batch_size=4,
+        shuffle=False,
+        num_workers=2,
+        pin_memory=True
+    )
 
+    print(f"Train set size: {len(train_subset)} | Val set size: {len(val_subset)}")
     print(f"COCO train dataset size: {len(train_dataset)}")
     print("Number of classes in dataset:", len(train_dataset.cat_id_to_index))
 
@@ -160,9 +191,9 @@ def main():
                 print("masks.shape:", masks.shape)    # should be [B, H, W]
 
             loss = criterion(logits, masks)
-
-            loss.backward()           # <-- Add this line
-            optimizer.step()          # <-- And this line
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item()
 
             # --- Visualization every 500 batches ---
             if batch_idx % 500 == 0:
@@ -191,7 +222,38 @@ def main():
                     plt.savefig(f"seg_pred_vs_gt_batch{batch_idx}_epoch{epoch}.png")
                     plt.close()
 
-        print(f"[epoch {epoch}/{args.epochs}] avg loss={epoch_loss/len(train_loader):.4f}")
+        print(f"[epoch {epoch}/{args.epochs}] avg train loss={epoch_loss/len(train_loader):.4f}")
+
+        # --- NEW: Validation loop ---
+        model.eval()
+        val_loss = 0.0
+        val_correct = 0
+        val_total = 0
+        with torch.no_grad():
+            for images, masks in val_loader:
+                images = images.to(device)
+                masks = masks.to(device)
+                out = model(images)
+                logits = out["segmentation_logits"]
+                if logits.dim() == 5 and logits.shape[1] == 1:
+                    logits = logits.squeeze(1)
+                elif logits.dim() == 5 and logits.shape[1] > 1:
+                    B, S, C, H, W = logits.shape
+                    logits = logits.view(B * S, C, H, W)
+                if logits.shape[-2:] != masks.shape[-2:]:
+                    masks = F.interpolate(masks.unsqueeze(1).float(), size=logits.shape[-2:], mode="nearest")
+                    masks = masks.squeeze(1).long()
+                if masks.ndim == 4 and masks.shape[1] == 1:
+                    masks = masks.squeeze(1)
+                loss = criterion(logits, masks)
+                val_loss += loss.item()
+                pred = logits.argmax(1)
+                val_correct += (pred == masks).float().sum().item()
+                val_total += masks.numel()
+        avg_val_loss = val_loss / len(val_loader)
+        val_acc = val_correct / val_total
+        print(f"[epoch {epoch}/{args.epochs}] avg val loss={avg_val_loss:.4f} | val pixel acc={val_acc:.4f}")
+        model.train()
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
