@@ -83,6 +83,7 @@ def coco_transform(image, mask, size=(256, 256)):
     mask = mask.resize(size, Image.NEAREST)
     image = T.ToTensor()(image)
     mask = torch.from_numpy(np.array(mask)).long()
+    mask = (mask > 0).long()  # All non-background become foreground
     return image, mask
 
 def main():
@@ -91,7 +92,7 @@ def main():
     print(f"Using device: {device}")
 
     print("Initializing and loading VGGT model...")
-    model = VGGT(num_seg_classes=81)
+    model = VGGT(num_seg_classes=2)
     _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
     load_with_strict_false(model, _URL)
     model = model.to(device)
@@ -103,7 +104,8 @@ def main():
         raise AttributeError("Model missing segmentation_head.")
     for p in model.segmentation_head.parameters():
         p.requires_grad = True
-    optimizer = torch.optim.AdamW(model.segmentation_head.parameters(), lr=args.lr)
+    optimizer = torch.optim.AdamW(model.segmentation_head
+    .parameters(), lr=args.lr)
     print(f"Optimizer initialized (lr={args.lr})")
 
     train_img_dir = args.train_path

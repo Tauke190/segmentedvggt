@@ -23,7 +23,7 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                  enable_depth=True,
                  enable_track=True,
                  enable_segmentation=True,   # <-- NEW
-                 num_seg_classes=91,           # <-- NEW
+                 num_seg_classes=2,           # <-- NEW
                  ):
         super().__init__()
 
@@ -118,4 +118,3 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
             predictions["images"] = images  # store the images for visualization during inference
 
         return predictions
-
