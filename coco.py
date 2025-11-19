@@ -7,6 +7,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from pycocotools.coco import COCO
 import torchvision.transforms as T
+import matplotlib.pyplot as plt
 
 
 # -----------------------------
@@ -89,3 +90,18 @@ if __name__ == "__main__":
     mask_pil.save("random_sample_mask.png")
 
     print(f"Saved random_sample_image.png and random_sample_mask.png (index {idx})")
+
+    # Visualize side by side
+    plt.figure(figsize=(8, 4))
+    plt.subplot(1, 2, 1)
+    plt.imshow(img_pil)
+    plt.title("Image")
+    plt.axis("off")
+
+    plt.subplot(1, 2, 2)
+    plt.imshow(mask.cpu().numpy(), cmap="nipy_spectral")
+    plt.title("Mask")
+    plt.axis("off")
+
+    plt.tight_layout()
+    plt.show()
