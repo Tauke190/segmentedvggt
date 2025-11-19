@@ -82,16 +82,13 @@ if __name__ == "__main__":
     idx = random.randint(0, len(train_dataset) - 1)
     image, mask = train_dataset[idx]
 
-    # Save the random image and mask
+    # Convert tensors to displayable formats
     img_pil = T.ToPILImage()(image)
-    img_pil.save("random_sample_image.png")
+    mask_np = mask.cpu().numpy().astype(np.uint8)
 
-    mask_pil = Image.fromarray(mask.cpu().numpy().astype(np.uint8))
-    mask_pil.save("random_sample_mask.png")
+    print(f"Visualizing random sample (index {idx})")
 
-    print(f"Saved random_sample_image.png and random_sample_mask.png (index {idx})")
-
-    # Visualize side by side
+    # Visualize side by side and save
     plt.figure(figsize=(8, 4))
     plt.subplot(1, 2, 1)
     plt.imshow(img_pil)
@@ -99,9 +96,10 @@ if __name__ == "__main__":
     plt.axis("off")
 
     plt.subplot(1, 2, 2)
-    plt.imshow(mask.cpu().numpy(), cmap="nipy_spectral")
+    plt.imshow(mask_np, cmap="nipy_spectral")
     plt.title("Mask")
     plt.axis("off")
 
     plt.tight_layout()
-    plt.show()
+    plt.savefig("random_image_and_mask.png")
+    print("Saved visualization as random_image_and_mask.png")
