@@ -285,7 +285,7 @@ def main():
                     wandb.log({
                         "train_eval_pixel_acc_batch": current_val_acc,
                         "train_eval_mIoU_batch": current_miou,
-                        "train_eval_batch_idx": batch_idx,
+                        "batch_idx": batch_idx,
                         "epoch": epoch
                     })
 
