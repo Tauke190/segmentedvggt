@@ -11,7 +11,9 @@ import torchvision.transforms as T
 # -----------------------------
 #  Transforms for image + mask
 # -----------------------------
-def coco_transform(image, mask):
+def coco_transform(image, mask, size=(256, 256)):
+    image = image.resize(size, Image.BILINEAR)
+    mask = mask.resize(size, Image.NEAREST)
     image = T.ToTensor()(image)
     mask = torch.from_numpy(np.array(mask)).long()
     return image, mask
@@ -71,7 +73,7 @@ if __name__ == "__main__":
     train_dataset = COCOSegmentation(
         img_dir=train_img_dir,
         ann_file=train_ann_file,
-        transforms=coco_transform
+        transforms=lambda img, msk: coco_transform(img, msk, size=(256, 256))
     )
 
     train_loader = DataLoader(
