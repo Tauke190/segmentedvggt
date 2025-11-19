@@ -1,1 +1,1 @@
-from coco_dataset import COCOSegmentation
+from .coco_dataset import COCOSegmentation
