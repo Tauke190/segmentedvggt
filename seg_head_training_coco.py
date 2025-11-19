@@ -31,7 +31,7 @@ from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 from torch.utils.data import DataLoader, Dataset
 import torchvision.transforms as T
 from PIL import Image
-from dataset import COCOSegmentationDataset
+from dataset import COCOSegmentation
 
 def save_point_cloud_as_ply(filename, points, colors):
     """
