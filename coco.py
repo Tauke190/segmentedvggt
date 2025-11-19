@@ -31,34 +31,31 @@ class COCOSegmentation(Dataset):
         self.ids = list(self.coco.imgs.keys())
         self.transforms = transforms
 
+        # Build category_id to contiguous index mapping
+        cats = self.coco.loadCats(self.coco.getCatIds())
+        self.cat_id_to_index = {cat['id']: i+1 for i, cat in enumerate(cats)}  # +1 to reserve 0 for background
+
     def __len__(self):
         return len(self.ids)
 
     def __getitem__(self, index):
         img_id = self.ids[index]
-
-        # Load image metadata
         img_info = self.coco.loadImgs(img_id)[0]
         img_path = os.path.join(self.img_dir, img_info["file_name"])
-        
-        # Load RGB image
         image = Image.open(img_path).convert("RGB")
 
-        # Load all annotations for this image
         ann_ids = self.coco.getAnnIds(imgIds=img_id, iscrowd=None)
         anns = self.coco.loadAnns(ann_ids)
 
-        # Create empty mask (H x W)
         mask = np.zeros((img_info["height"], img_info["width"]), dtype=np.uint8)
 
-        # Fill mask: category_id per pixel
         for ann in anns:
             m = self.coco.annToMask(ann)
-            mask = np.maximum(mask, m * ann["category_id"])
+            cat_idx = self.cat_id_to_index[ann["category_id"]]
+            mask = np.maximum(mask, m * cat_idx)
 
         mask = Image.fromarray(mask)
 
-        # Apply transform
         if self.transforms:
             image, mask = self.transforms(image, mask)
 
@@ -81,6 +78,10 @@ if __name__ == "__main__":
     # Sample a random index
     idx = random.randint(0, len(train_dataset) - 1)
     image, mask = train_dataset[idx]
+
+    img_id = train_dataset.ids[idx]
+    ann_ids = train_dataset.coco.getAnnIds(imgIds=img_id, iscrowd=None)
+    print("Annotation count:", len(ann_ids))
 
     # Convert tensors to displayable formats
     img_pil = T.ToPILImage()(image)
