@@ -272,6 +272,7 @@ def main():
 
     num_classes = len(train_dataset.cat_id_to_index) + 1  # +1 for background
     model = VGGT(num_seg_classes=num_classes)
+    model = model.to(device)  # <-- Add this line
 
     criterion = torch.nn.CrossEntropyLoss()
 
