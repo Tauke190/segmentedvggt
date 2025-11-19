@@ -90,7 +90,7 @@ def main():
     print(f"Using device: {device}")
 
     print("Initializing and loading VGGT model...")
-    model = VGGT(num_seg_classes=91)  # <-- Ensure correct number of classes
+    model = VGGT(num_seg_classes=81)  # <-- Ensure correct number of classes
     _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
     load_with_strict_false(model, _URL)
     model = model.to(device)
@@ -124,10 +124,6 @@ def main():
 
     print(f"COCO train dataset size: {len(train_dataset)}")
     print("Number of classes in dataset:", len(train_dataset.cat_id_to_index))
-
-    num_classes = len(train_dataset.cat_id_to_index) + 1  # +1 for background
-    model = VGGT(num_seg_classes=num_classes)
-    model = model.to(device)  # <-- Add this line
 
     criterion = torch.nn.CrossEntropyLoss()
 
