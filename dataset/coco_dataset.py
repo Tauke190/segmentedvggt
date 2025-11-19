@@ -31,9 +31,8 @@ class COCOSegmentation(Dataset):
         mask = np.zeros((img_info["height"], img_info["width"]), dtype=np.uint8)
 
         for ann in anns:
-            m = self.coco.annToMask(ann)
-            cat_idx = self.cat_id_to_index[ann["category_id"]]
-            mask = np.maximum(mask, m * cat_idx)
+            mask_instance = self.coco.annToMask(ann)
+            mask = np.maximum(mask, mask_instance)  # Combine all objects
 
         mask = Image.fromarray(mask)
 
