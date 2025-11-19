@@ -94,8 +94,8 @@ def main():
     print(f"Optimizer initialized (lr={args.lr})")
 
     train_img_dir = args.train_path
-    train_ann_file = args.annotation_path
-
+    train_ann_file = args.train_annotation_path
+    
     train_dataset = COCOSegmentation(
         img_dir=train_img_dir,
         ann_file=train_ann_file,
