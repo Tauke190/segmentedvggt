@@ -179,7 +179,7 @@ def main():
 
     train_loader = DataLoader(
         train_dataset,
-        batch_size=1,  # <-- changed from 4 to 1
+        batch_size=2, 
         shuffle=True,
         num_workers=4,
         pin_memory=True
@@ -222,6 +222,9 @@ def main():
                 print("masks.shape:", masks.shape)    # should be [B, H, W]
 
             loss = criterion(logits, masks)
+
+            loss.backward()           # <-- Add this line
+            optimizer.step()          # <-- And this line
 
             # --- Visualization every 500 batches ---
             if batch_idx % 500 == 0:

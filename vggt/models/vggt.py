@@ -13,7 +13,6 @@ from vggt.heads.camera_head import CameraHead
 from vggt.heads.dpt_head import DPTHead
 from vggt.heads.track_head import TrackHead
 
-
 class VGGT(nn.Module, PyTorchModelHubMixin):
     def __init__(self,
                  img_size=518,
@@ -94,7 +93,6 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                 predictions["depth"] = depth
                 predictions["depth_conf"] = depth_conf
 
-            # NEW: run segmentation head
             if self.segmentation_head is not None:
                 seg_logits, _ = self.segmentation_head(
                     aggregated_tokens_list, images=images, patch_start_idx=patch_start_idx
