@@ -182,9 +182,9 @@ def coco_collate_fn(batch):
 # -----------------------------
 #  Transforms for image + mask
 # -----------------------------
-def coco_transform(image, mask, size=(256, 256)):
+def coco_transform(image, mask, size=(252, 252)):
     image = image.resize(size, Image.BILINEAR)
-    mask = mask.resize(size, Image.NEAREST)
+    mask = mask.resize(size, Image.NEAREST)  # <--- mask is resized here
     image = T.ToTensor()(image)
     mask = torch.from_numpy(np.array(mask)).long()
     return image, mask
@@ -259,7 +259,7 @@ def main():
     train_dataset = COCOSegmentation(
         img_dir=train_img_dir,
         ann_file=train_ann_file,
-        transforms=lambda img, msk: coco_transform(img, msk, size=(256, 256))
+        transforms=lambda img, msk: coco_transform(img, msk, size=(252, 252))  # <-- changed
     )
 
     train_loader = DataLoader(
