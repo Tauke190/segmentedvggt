@@ -13,7 +13,6 @@ import threading
 import argparse
 from typing import List, Optional
 import random
-
 import numpy as np
 import torch
 from tqdm.auto import tqdm
@@ -34,12 +33,11 @@ import torchvision.transforms as T
 from PIL import Image
 from dataset import COCOSegmentation
 from torch.utils.data import Subset
-
+import wandb
 
 
 TRAIN_PATH = "/home/av354855/data/datasets/coco/train2017"
 TRAIN_ANN_FILE = "/home/av354855/data/datasets/coco/annotations/instances_train2017.json"
-
 
 parser = argparse.ArgumentParser(description="VGGT segmentation head training")
 parser.add_argument("--epochs", type=int, default=50, help="Number of finetuning epochs per scene")
@@ -75,9 +73,6 @@ def coco_collate_fn(batch):
     masks = torch.stack([m.squeeze().long() for m in masks])
     return images, masks
 
-# -----------------------------
-#  Transforms for image + mask
-# -----------------------------
 def coco_transform(image, mask, size=(256, 256)):
     image = image.resize(size, Image.BILINEAR)
     mask = mask.resize(size, Image.NEAREST)
@@ -97,7 +92,6 @@ def main():
     load_with_strict_false(model, _URL)
     model = model.to(device)
 
-    # Freeze backbone, allow segmentation head
     for p in model.parameters():
         p.requires_grad = False
     if not hasattr(model, "segmentation_head"):
@@ -117,7 +111,6 @@ def main():
         transforms=lambda img, msk: coco_transform(img, msk, size=(252, 252))
     )
 
-    # --- NEW: Subsample the dataset if train_fraction < 1.0 ---
     if args.train_fraction < 1.0:
         total_len = len(train_dataset)
         subset_len = int(total_len * args.train_fraction)
@@ -138,7 +131,7 @@ def main():
 
     train_loader = DataLoader(
         train_subset,
-        batch_size=8, 
+        batch_size=32, 
         shuffle=True,
         num_workers=4,
         pin_memory=True
@@ -160,6 +153,17 @@ def main():
     print("Number of classes in dataset:", len(base_dataset.cat_id_to_index))
 
     criterion = torch.nn.CrossEntropyLoss()
+
+    best_val_acc = 0.0
+    best_epoch = 0
+    early_stop_patience = 1  # Stop immediately if drop > 5%
+    early_stop_counter = 0
+    best_model_state = None
+
+    wandb.init(
+        project="vggt-segmentation",  # Change this as needed
+        config=vars(args)
+    )
 
     model.train()
     for epoch in range(1, args.epochs + 1):
@@ -199,8 +203,10 @@ def main():
             epoch_loss += loss.item()
 
             # --- Visualization every 500 batches ---
-            if batch_idx % 1000 == 0:
+            if batch_idx % 200 == 0:
                 with torch.no_grad():
+                    print(f"[epoch {epoch}][batch {batch_idx}] batch loss={loss.item():.4f}")
+
                     # Take the first sample in the batch
                     pred_mask = logits.argmax(1)[0].cpu().numpy().astype(np.uint8)
                     gt_mask = masks[0].cpu().numpy().astype(np.uint8)
@@ -227,11 +233,13 @@ def main():
 
         print(f"[epoch {epoch}/{args.epochs}] avg train loss={epoch_loss/len(train_loader):.4f}")
 
-        # --- NEW: Validation loop ---
+        # --- Validation loop ---
         model.eval()
         val_loss = 0.0
         val_correct = 0
         val_total = 0
+        iou_sum = 0.0
+        iou_count = 0
         with torch.no_grad():
             for images, masks in val_loader:
                 images = images.to(device)
@@ -253,20 +261,55 @@ def main():
                 pred = logits.argmax(1)
                 val_correct += (pred == masks).float().sum().item()
                 val_total += masks.numel()
+
+                # --- mIoU calculation ---
+                for cls in range(2):  # for each class (background, foreground)
+                    pred_inds = (pred == cls)
+                    target_inds = (masks == cls)
+                    intersection = (pred_inds & target_inds).sum().item()
+                    union = (pred_inds | target_inds).sum().item()
+                    if union > 0:
+                        iou_sum += intersection / union
+                        iou_count += 1
+
         avg_val_loss = val_loss / len(val_loader)
         val_acc = val_correct / val_total
-        print(f"[epoch {epoch}/{args.epochs}] avg val loss={avg_val_loss:.4f} | val pixel acc={val_acc:.4f}")
-        model.train()
+        miou = iou_sum / iou_count if iou_count > 0 else 0.0
+        print(f"[epoch {epoch}/{args.epochs}] avg val loss={avg_val_loss:.4f} | val pixel acc={val_acc:.4f} | val mIoU={miou:.4f}")
+
+        # Log metrics to wandb
+        wandb.log({
+            "epoch": epoch,
+            "train_loss": epoch_loss / len(train_loader),
+            "val_loss": avg_val_loss,
+            "val_pixel_acc": val_acc,
+            "val_mIoU": miou
+        })
+
+        # --- Save best model and early stopping ---
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            best_epoch = epoch
+            best_model_state = model.segmentation_head.state_dict()
+            torch.save(
+                {"segmentation_head": best_model_state},
+                args.save_path
+            )
+            print(f"New best model saved at epoch {epoch} with val acc {val_acc:.4f}")
+            early_stop_counter = 0
+        elif val_acc < best_val_acc * 0.95:
+            early_stop_counter += 1
+            print(f"Validation accuracy dropped by more than 5% from best. Early stopping triggered.")
+            break
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         gc.collect()
 
-    torch.save(
-        {"segmentation_head": model.segmentation_head.state_dict()},
-        args.save_path
-    )
-    print(f"Saved segmentation_head weights to {args.save_path}")
+    wandb.summary["best_val_acc"] = best_val_acc
+    wandb.summary["best_epoch"] = best_epoch
+    print(f"Best validation accuracy: {best_val_acc:.4f} at epoch {best_epoch}")
+    print(f"Best model weights saved to {args.save_path}")
     print("Training complete.")
 
 if __name__ == "__main__":
