@@ -5,7 +5,6 @@ from torch.utils.data import Dataset
 from pycocotools.coco import COCO
 
 
-
 class COCOSegmentation(Dataset):
     def __init__(self, img_dir, ann_file, transforms=None):
         self.img_dir = img_dir

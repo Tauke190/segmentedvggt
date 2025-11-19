@@ -31,7 +31,7 @@ from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 from torch.utils.data import DataLoader, Dataset
 import torchvision.transforms as T
 from PIL import Image
-from dataset import COCOSegmentation
+from dataset import COCOSegmentationDataset
 
 def save_point_cloud_as_ply(filename, points, colors):
     """
@@ -137,7 +137,9 @@ def coco_collate_fn(batch):
     masks = torch.stack([m.squeeze().long() for m in masks])
     return images, masks
 
-
+# -----------------------------
+#  Transforms for image + mask
+# -----------------------------
 def coco_transform(image, mask, size=(256, 256)):
     image = image.resize(size, Image.BILINEAR)
     mask = mask.resize(size, Image.NEAREST)
@@ -174,8 +176,6 @@ def main():
         ann_file=train_ann_file,
         transforms=lambda img, msk: coco_transform(img, msk, size=(252, 252))
     )
-    num_classes = len(train_dataset.cat_id_to_index) + 1  # +1 for background
-
 
     train_loader = DataLoader(
         train_dataset,
@@ -186,8 +186,10 @@ def main():
     )
 
     print(f"COCO train dataset size: {len(train_dataset)}")
+
+    num_classes = len(train_dataset.cat_id_to_index) + 1  # +1 for background
     model = VGGT(num_seg_classes=num_classes)
-    model = model.to(device)
+    model = model.to(device)  # <-- Add this line
 
     criterion = torch.nn.CrossEntropyLoss()
 
@@ -196,24 +198,30 @@ def main():
         epoch_loss = 0.0
         for batch_idx, (images, masks) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch}")):
             images = images.to(device)
-            masks = masks.to(device)
+            masks = masks.to(device)  # [B, H, W], dtype long
             optimizer.zero_grad(set_to_none=True)
 
             out = model(images)
-            logits = out["segmentation_logits"]
+            logits = out["segmentation_logits"]  # [1, 1, 91, 252, 252]
             if logits.dim() == 5 and logits.shape[1] == 1:
-                logits = logits.squeeze(1)
+                logits = logits.squeeze(1)  # [1, 91, 252, 252]
 
+            # Resize masks if needed to match logits
             if logits.shape[-2:] != masks.shape[-2:]:
                 masks = F.interpolate(masks.unsqueeze(1).float(), size=logits.shape[-2:], mode="nearest")
                 masks = masks.squeeze(1).long()
+
+            # Always ensure masks is [B, H, W] before loss
             if masks.ndim == 4 and masks.shape[1] == 1:
                 masks = masks.squeeze(1)
 
+            # Debugging shapes
+            if batch_idx == 0:
+                print("images.shape:", images.shape)
+                print("logits.shape:", logits.shape)  # should be [B, C, H, W]
+                print("masks.shape:", masks.shape)    # should be [B, H, W]
+
             loss = criterion(logits, masks)
-            loss.backward()
-            optimizer.step()
-            epoch_loss += loss.item()
 
             # --- Visualization every 500 batches ---
             if batch_idx % 500 == 0:

@@ -11,7 +11,6 @@ from huggingface_hub import PyTorchModelHubMixin  # used for model hub
 from vggt.models.aggregator import Aggregator
 from vggt.heads.camera_head import CameraHead
 from vggt.heads.dpt_head import DPTHead
-from vggt.heads.unet_decoder_head import UNetDecoderHead
 from vggt.heads.track_head import TrackHead
 
 
@@ -24,8 +23,8 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                  enable_point=True,
                  enable_depth=True,
                  enable_track=True,
+                 enable_segmentation=True,   # <-- NEW
                  num_seg_classes=91,           # <-- NEW
-                 unet_features=[512, 256, 128, 64],  # NEW: U-Net features
                  ):
         super().__init__()
 
@@ -37,15 +36,15 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
             dim_in=2 * embed_dim, output_dim=2, activation="exp", conf_activation="expp1"
         ) if enable_depth else None
 
+        # NEW: segmentation head (logits only, no confidence)
+        self.segmentation_head = DPTHead(
+            dim_in=2 * embed_dim,
+            output_dim=num_seg_classes,
+            activation="identity",
+            conf_activation="none",
+            return_conf=False,
+        ) if enable_segmentation else None
 
-        # NEW: segmentation head (choose DPT or U-Net style)
-       
-        self.segmentation_head = UNetDecoderHead(
-            in_channels=2 * embed_dim,
-            num_classes=num_seg_classes,
-            features=unet_features
-        )
-        
         self.track_head = TrackHead(dim_in=2 * embed_dim, patch_size=patch_size) if enable_track else None
 
     def forward(self, images: torch.Tensor, query_points: torch.Tensor = None):
@@ -95,28 +94,12 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                 predictions["depth"] = depth
                 predictions["depth_conf"] = depth_conf
 
-
             # NEW: run segmentation head
             if self.segmentation_head is not None:
-                if isinstance(self.segmentation_head, UNetDecoderHead):
-                    # Assume last token list is [B, S, C, H, W] or [B, C, H, W]
-                    # Use the last feature map from aggregator
-                    feat = aggregated_tokens_list[-1]
-                    # If input is [B, S, C, H, W], merge S into B
-                    if feat.dim() == 5:
-                        B, S, C, H, W = feat.shape
-                        feat = feat.view(B * S, C, H, W)
-                    elif feat.dim() == 4 and feat.shape[1] != model.segmentation_head.in_channels:
-                        # If shape is [B, H, W, C], permute to [B, C, H, W]
-                        feat = feat.permute(0, 3, 1, 2)
-                    # Now feat should be [B, C, H, W]
-                    seg_logits = self.segmentation_head(feat)
-                    predictions["segmentation_logits"] = seg_logits  # [B,S,C,H,W] or [B,C,H,W]
-                else:
-                    seg_logits, _ = self.segmentation_head(
-                        aggregated_tokens_list, images=images, patch_start_idx=patch_start_idx
-                    )
-                    predictions["segmentation_logits"] = seg_logits  # [B,S,C,H,W]
+                seg_logits, _ = self.segmentation_head(
+                    aggregated_tokens_list, images=images, patch_start_idx=patch_start_idx
+                )
+                predictions["segmentation_logits"] = seg_logits  # [B,S,C,H,W]
 
             if self.point_head is not None:
                 pts3d, pts3d_conf = self.point_head(
@@ -137,6 +120,4 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
             predictions["images"] = images  # store the images for visualization during inference
 
         return predictions
-
-        print("Shape before segmentation head:", feat.shape)
 
