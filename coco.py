@@ -1,6 +1,7 @@
 import os
 import numpy as np
 from PIL import Image
+import random
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -76,30 +77,15 @@ if __name__ == "__main__":
         transforms=lambda img, msk: coco_transform(img, msk, size=(256, 256))
     )
 
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=4,
-        shuffle=True,
-        num_workers=4,
-        pin_memory=True
-    )
+    # Sample a random index
+    idx = random.randint(0, len(train_dataset) - 1)
+    image, mask = train_dataset[idx]
 
-    # Test loading one batch
-    for images, masks in train_loader:
-        print("Images batch:", images.shape)  # [B, 3, H, W]
-        print("Masks batch:", masks.shape)    # [B, H, W]
+    # Save the random image and mask
+    img_pil = T.ToPILImage()(image)
+    img_pil.save("random_sample_image.png")
 
-        # Save the first image and mask in the batch
-        img = images[0]
-        mask = masks[0]
+    mask_pil = Image.fromarray(mask.cpu().numpy().astype(np.uint8))
+    mask_pil.save("random_sample_mask.png")
 
-        # Convert tensor to PIL Image and save
-        img_pil = T.ToPILImage()(img)
-        img_pil.save("sample_image.png")
-
-        # Convert mask to uint8 and save as PNG
-        mask_pil = Image.fromarray(mask.cpu().numpy().astype(np.uint8))
-        mask_pil.save("sample_mask.png")
-
-        print("Saved sample_image.png and sample_mask.png")
-        break
+    print(f"Saved random_sample_image.png and random_sample_mask.png (index {idx})")
