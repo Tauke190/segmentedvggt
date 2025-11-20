@@ -329,6 +329,7 @@ def main():
     val_total = 0
     iou_sum = 0.0
     iou_count = 0
+    val_acc = 0.0  # Initialize before use
     with torch.no_grad():
         for images, masks in val_loader:
             images = images.to(device)
