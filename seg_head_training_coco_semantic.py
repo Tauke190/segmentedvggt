@@ -44,6 +44,7 @@ parser.add_argument("--train_annotation_path", type=str, default=TRAIN_ANN_FILE,
 parser.add_argument("--train_fraction", type=float, default=1.0, help="Fraction of training data to use (0 < x <= 1)")
 parser.add_argument("--val_path", type=str, default=VAL_PATH, required=False, help="Path to COCO validation images directory")
 parser.add_argument("--val_annotation_path", type=str, default=VAL_ANN_FILE, required=False, help="Path to COCO validation annotation file")
+parser.add_argument("--binary", action="store_true", help="Use binary segmentation (foreground/background)")
 
 
 def load_with_strict_false(model, url_or_path: str):
@@ -71,12 +72,13 @@ def coco_collate_fn(batch):
     masks = torch.stack([m.squeeze().long() for m in masks])
     return images, masks
 
-def coco_transform(image, mask, size=(256, 256)):
+def coco_transform(image, mask, size=(256, 256), binary=False):
     image = image.resize(size, Image.BILINEAR)
     mask = mask.resize(size, Image.NEAREST)
     image = T.ToTensor()(image)
     mask = torch.from_numpy(np.array(mask)).long()
-    mask = (mask > 0).long()  # All non-background become foreground
+    if binary:
+        mask = (mask > 0).long()  # All non-background become foreground
     return image, mask
 
 def main():
@@ -84,8 +86,11 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
+    # Set number of classes based on --binary flag
+    num_seg_classes = 2 if args.binary else 91
+
     print("Initializing and loading VGGT model...")
-    model = VGGT(num_seg_classes=2)
+    model = VGGT(num_seg_classes=num_seg_classes)
     _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
     load_with_strict_false(model, _URL)
     model = model.to(device)
@@ -96,17 +101,16 @@ def main():
         raise AttributeError("Model missing segmentation_head.")
     for p in model.segmentation_head.parameters():
         p.requires_grad = True
-    optimizer = torch.optim.AdamW(model.segmentation_head
-    .parameters(), lr=args.lr)
+    optimizer = torch.optim.AdamW(model.segmentation_head.parameters(), lr=args.lr)
     print(f"Optimizer initialized (lr={args.lr})")
 
     train_img_dir = args.train_path
     train_ann_file = args.train_annotation_path
-    
+
     train_dataset = COCOSegmentation(
         img_dir=train_img_dir,
         ann_file=train_ann_file,
-        transforms=lambda img, msk: coco_transform(img, msk, size=(252, 252))
+        transforms=lambda img, msk: coco_transform(img, msk, size=(252, 252), binary=args.binary)
     )
 
     if args.train_fraction < 1.0:
@@ -144,9 +148,9 @@ def main():
 
     # --- True validation loader from COCO val2017 ---
     val_dataset = COCOSegmentation(
-        img_dir=VAL_PATH,
-        ann_file=VAL_ANN_FILE,
-        transforms=lambda img, msk: coco_transform(img, msk, size=(252, 252))
+        img_dir=args.val_path,
+        ann_file=args.val_annotation_path,
+        transforms=lambda img, msk: coco_transform(img, msk, size=(252, 252), binary=args.binary)
     )
     val_loader = DataLoader(
         val_dataset,
@@ -164,6 +168,7 @@ def main():
         base_dataset = train_dataset
     print("Number of classes in dataset:", len(base_dataset.cat_id_to_index))
 
+    # Use CrossEntropyLoss for both binary and multi-class
     criterion = torch.nn.CrossEntropyLoss()
 
     best_val_acc = 0.0
@@ -364,6 +369,12 @@ def main():
         "final_val_pixel_acc": val_acc,
         "final_val_mIoU": miou
     })
+
+    # After creating your dataset
+    cat_ids = base_dataset.cat_id_to_index.keys()
+    print(f"Number of semantic classes (excluding background): {len(cat_ids)}")
+    print(f"Category IDs: {sorted(cat_ids)}")
+    print(f"Total classes including background: {len(cat_ids) + 1}")
 
 if __name__ == "__main__":
     main()
