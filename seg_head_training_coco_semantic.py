@@ -22,7 +22,6 @@ from dataset import COCOSegmentation
 from torch.utils.data import Subset
 import wandb
 
-
 TRAIN_PATH = "/home/c3-0/datasets/coco/train2017"
 TRAIN_ANN_FILE = "/home/c3-0/datasets/coco/annotations/instances_train2017.json"
 VAL_PATH = "/home/c3-0/datasets/coco/val2017"
@@ -46,7 +45,6 @@ parser.add_argument("--val_path", type=str, default=VAL_PATH, required=False, he
 parser.add_argument("--val_annotation_path", type=str, default=VAL_ANN_FILE, required=False, help="Path to COCO validation annotation file")
 parser.add_argument("--binary", action="store_true", help="Use binary segmentation (foreground/background)")
 
-
 def load_with_strict_false(model, url_or_path: str):
     if os.path.isfile(url_or_path):
         state = torch.load(url_or_path, map_location="cpu")
@@ -64,11 +62,9 @@ def load_with_strict_false(model, url_or_path: str):
     return msg
 
 def coco_collate_fn(batch):
-    # batch: list of (image, target) tuples
     images = [item[0] for item in batch]
     masks = [item[1] for item in batch]
     images = torch.stack(images)
-    # Each mask is [H, W] with class indices; stack as [B, H, W]
     masks = torch.stack([m.squeeze().long() for m in masks])
     return images, masks
 
@@ -86,41 +82,20 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
-    # Set number of classes based on --binary flag
-    num_seg_classes = 2 if args.binary else 81
-
-    print("Initializing and loading VGGT model...")
-    model = VGGT(num_seg_classes=num_seg_classes)
-    _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
-    load_with_strict_false(model, _URL)
-    model = model.to(device)
-
-    for p in model.parameters():
-        p.requires_grad = False
-    if not hasattr(model, "segmentation_head"):
-        raise AttributeError("Model missing segmentation_head.")
-    for p in model.segmentation_head.parameters():
-        p.requires_grad = True
-    optimizer = torch.optim.AdamW(model.segmentation_head.parameters(), lr=args.lr)
-    print(f"Optimizer initialized (lr={args.lr})")
-
-    train_img_dir = args.train_path
-    train_ann_file = args.train_annotation_path
-
     # --- Dataset initialization depending on --binary flag ---
     if args.binary:
         train_dataset = COCOSegmentation(
-            img_dir=train_img_dir,
-            ann_file=train_ann_file,
+            img_dir=args.train_path,
+            ann_file=args.train_annotation_path,
             transforms=lambda img, msk: coco_transform(img, msk, size=(252, 252), binary=True),
             return_instance_masks=False
         )
     else:
         train_dataset = COCOSegmentation(
-            img_dir=train_img_dir,
-            ann_file=train_ann_file,
+            img_dir=args.train_path,
+            ann_file=args.train_annotation_path,
             transforms=lambda img, msk: coco_transform(img, msk, size=(252, 252), binary=False),
-            return_instance_masks=False  # For semantic, still use single mask but with class indices
+            return_instance_masks=False
         )
 
     if args.train_fraction < 1.0:
@@ -170,15 +145,32 @@ def main():
         pin_memory=True
     )
 
-    print(f"Train set size: {len(train_subset)} | Train-eval set size: {len(train_eval_subset)} | Val set size: {len(val_dataset)}")
-    print(f"COCO train dataset size: {len(train_dataset)}")
+    # --- Determine number of classes dynamically ---
     if isinstance(train_dataset, Subset):
         base_dataset = train_dataset.dataset
     else:
         base_dataset = train_dataset
-    print("Number of classes in dataset:", len(base_dataset.cat_id_to_index))
+    cat_ids = base_dataset.cat_id_to_index.keys()
+    num_seg_classes = 2 if args.binary else (len(cat_ids) + 1)  # 80 + 1 = 81 for COCO semantic
+    print(f"Number of semantic classes (excluding background): {len(cat_ids)}")
+    print(f"Category IDs: {sorted(cat_ids)}")
+    print(f"Total classes including background: {num_seg_classes}")
 
-    # Use CrossEntropyLoss for both binary and multi-class
+    print("Initializing and loading VGGT model...")
+    model = VGGT(num_seg_classes=num_seg_classes)
+    _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
+    load_with_strict_false(model, _URL)
+    model = model.to(device)
+
+    for p in model.parameters():
+        p.requires_grad = False
+    if not hasattr(model, "segmentation_head"):
+        raise AttributeError("Model missing segmentation_head.")
+    for p in model.segmentation_head.parameters():
+        p.requires_grad = True
+    optimizer = torch.optim.AdamW(model.segmentation_head.parameters(), lr=args.lr)
+    print(f"Optimizer initialized (lr={args.lr})")
+
     criterion = torch.nn.CrossEntropyLoss()
 
     best_val_acc = 0.0
@@ -201,11 +193,10 @@ def main():
             optimizer.zero_grad(set_to_none=True)
 
             out = model(images)
-            logits = out["segmentation_logits"]  # [1, 1, 91, 252, 252]
+            logits = out["segmentation_logits"]  # [B, C, H, W] or [B, 1, C, H, W]
             if logits.dim() == 5 and logits.shape[1] == 1:
                 logits = logits.squeeze(1)  # [B, C, H, W]
             elif logits.dim() == 5 and logits.shape[1] > 1:
-                # Merge batch and sequence: [B, S, C, H, W] -> [B*S, C, H, W]
                 B, S, C, H, W = logits.shape
                 logits = logits.view(B * S, C, H, W)
 
@@ -214,110 +205,108 @@ def main():
                 masks = F.interpolate(masks.unsqueeze(1).float(), size=logits.shape[-2:], mode="nearest")
                 masks = masks.squeeze(1).long()
 
-            # Always ensure masks is [B, H, W] before loss
             if masks.ndim == 4 and masks.shape[1] == 1:
                 masks = masks.squeeze(1)
 
-            # Debugging shapes
             if batch_idx == 0:
                 print("images.shape:", images.shape)
-                print("logits.shape:", logits.shape)  # should be [B, C, H, W]
-                print("masks.shape:", masks.shape)    # should be [B, H, W]
+                print("logits.shape:", logits.shape)
+                print("masks.shape:", masks.shape)
 
             loss = criterion(logits, masks)
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
 
-            # --- Visualization every 200 batches ---
-            if batch_idx % 200 == 0:
-                with torch.no_grad():
-                    print(f"[epoch {epoch}][batch {batch_idx}] batch loss={loss.item():.4f}")
-
-                    # Take the first sample in the batch
-                    pred_mask = logits.argmax(1)[0].cpu().numpy().astype(np.uint8)
-                    gt_mask = masks[0].cpu().numpy().astype(np.uint8)
-                    img = images[0].cpu()
-                    # Convert image tensor to PIL
-                    img_pil = T.ToPILImage()(img)
-                    # Plot
-                    plt.figure(figsize=(12, 4))
-                    plt.subplot(1, 3, 1)
-                    plt.imshow(img_pil)
-                    plt.title("Image")
-                    plt.axis("off")
-                    plt.subplot(1, 3, 2)
-                    plt.imshow(gt_mask, cmap="nipy_spectral")
-                    plt.title("GT Mask")
-                    plt.axis("off")
-                    plt.subplot(1, 3, 3)
-                    plt.imshow(pred_mask, cmap="nipy_spectral")
-                    plt.title("Predicted Mask")
-                    plt.axis("off")
-                    plt.tight_layout()
-                    plt.savefig(f"seg_pred_vs_gt_batch{batch_idx}_epoch{epoch}.png")
-                    plt.close()
-
-                # --- Evaluate on train-eval set every 200 batches ---
-                model.eval()
-                val_correct = 0
-                val_total = 0
-                iou_sum = 0.0
-                iou_count = 0
-                with torch.no_grad():
-                    for eval_images, eval_masks in train_eval_loader:
-                        eval_images = eval_images.to(device)
-                        eval_masks = eval_masks.to(device)
-                        eval_out = model(eval_images)
-                        eval_logits = eval_out["segmentation_logits"]
-                        if eval_logits.dim() == 5 and eval_logits.shape[1] == 1:
-                            eval_logits = eval_logits.squeeze(1)
-                        elif eval_logits.dim() == 5 and eval_logits.shape[1] > 1:
-                            B, S, C, H, W = eval_logits.shape
-                            eval_logits = eval_logits.view(B * S, C, H, W)
-                        if eval_logits.shape[-2:] != eval_masks.shape[-2:]:
-                            eval_masks = F.interpolate(eval_masks.unsqueeze(1).float(), size=eval_logits.shape[-2:], mode="nearest")
-                            eval_masks = eval_masks.squeeze(1).long()
-                        if eval_masks.ndim == 4 and eval_masks.shape[1] == 1:
-                            eval_masks = eval_masks.squeeze(1)
-                        eval_pred = eval_logits.argmax(1)
-                        val_correct += (eval_pred == eval_masks).float().sum().item()
-                        val_total += eval_masks.numel()
-                        for cls in range(num_seg_classes):
-                            pred_inds = (eval_pred == cls)
-                            target_inds = (eval_masks == cls)
-                            intersection = (pred_inds & target_inds).sum().item()
-                            union = (pred_inds | target_inds).sum().item()
-                            if union > 0:
-                                iou_sum += intersection / union
-                                iou_count += 1
-                current_val_acc = val_correct / val_total if val_total > 0 else 0.0
-                current_miou = iou_sum / iou_count if iou_count > 0 else 0.0
-                print(f"[train-eval][batch {batch_idx}] train-eval pixel acc={current_val_acc:.4f} | train-eval mIoU={current_miou:.4f}")
-                wandb.log({
-                    "train_eval_pixel_acc_batch": current_val_acc,
-                    "train_eval_mIoU_batch": current_miou,
-                    "train_eval_batch_idx": batch_idx,
-                    "epoch": epoch
-                })
-                model.train()
-
         print(f"[epoch {epoch}/{args.epochs}] avg train loss={epoch_loss/len(train_loader):.4f}")
 
-    
+        # --- Visualization at the end of each epoch ---
+        with torch.no_grad():
+            images_vis, masks_vis = next(iter(train_loader))
+            images_vis = images_vis.to(device)
+            out_vis = model(images_vis)
+            logits_vis = out_vis["segmentation_logits"]
+            if logits_vis.dim() == 5 and logits_vis.shape[1] == 1:
+                logits_vis = logits_vis.squeeze(1)
+            elif logits_vis.dim() == 5 and logits_vis.shape[1] > 1:
+                B, S, C, H, W = logits_vis.shape
+                logits_vis = logits_vis.view(B * S, C, H, W)
+            pred_mask = logits_vis.argmax(1)[0].cpu().numpy().astype(np.uint8)
+            gt_mask = masks_vis[0].cpu().numpy().astype(np.uint8)
+            img = images_vis[0].cpu()
+            img_pil = T.ToPILImage()(img)
+            plt.figure(figsize=(12, 4))
+            plt.subplot(1, 3, 1)
+            plt.imshow(img_pil)
+            plt.title("Image")
+            plt.axis("off")
+            plt.subplot(1, 3, 2)
+            plt.imshow(gt_mask, cmap="nipy_spectral")
+            plt.title("GT Mask")
+            plt.axis("off")
+            plt.subplot(1, 3, 3)
+            plt.imshow(pred_mask, cmap="nipy_spectral")
+            plt.title("Predicted Mask")
+            plt.axis("off")
+            plt.tight_layout()
+            plt.savefig(f"seg_pred_vs_gt_epoch{epoch}.png")
+            plt.close()
+
+        # --- Evaluate on train-eval set at the end of each epoch ---
+        model.eval()
+        val_correct = 0
+        val_total = 0
+        iou_sum = 0.0
+        iou_count = 0
+        with torch.no_grad():
+            for eval_images, eval_masks in train_eval_loader:
+                eval_images = eval_images.to(device)
+                eval_masks = eval_masks.to(device)
+                eval_out = model(eval_images)
+                eval_logits = eval_out["segmentation_logits"]
+                if eval_logits.dim() == 5 and eval_logits.shape[1] == 1:
+                    eval_logits = eval_logits.squeeze(1)
+                elif eval_logits.dim() == 5 and eval_logits.shape[1] > 1:
+                    B, S, C, H, W = eval_logits.shape
+                    eval_logits = eval_logits.view(B * S, C, H, W)
+                if eval_logits.shape[-2:] != eval_masks.shape[-2:]:
+                    eval_masks = F.interpolate(eval_masks.unsqueeze(1).float(), size=eval_logits.shape[-2:], mode="nearest")
+                    eval_masks = eval_masks.squeeze(1).long()
+                if eval_masks.ndim == 4 and eval_masks.shape[1] == 1:
+                    eval_masks = eval_masks.squeeze(1)
+                eval_pred = eval_logits.argmax(1)
+                val_correct += (eval_pred == eval_masks).float().sum().item()
+                val_total += eval_masks.numel()
+                for cls in range(num_seg_classes):
+                    pred_inds = (eval_pred == cls)
+                    target_inds = (eval_masks == cls)
+                    intersection = (pred_inds & target_inds).sum().item()
+                    union = (pred_inds | target_inds).sum().item()
+                    if union > 0:
+                        iou_sum += intersection / union
+                        iou_count += 1
+        current_val_acc = val_correct / val_total if val_total > 0 else 0.0
+        current_miou = iou_sum / iou_count if iou_count > 0 else 0.0
+        print(f"[train-eval][epoch {epoch}] train-eval pixel acc={current_val_acc:.4f} | train-eval mIoU={current_miou:.4f}")
+        wandb.log({
+            "train_eval_pixel_acc_epoch": current_val_acc,
+            "train_eval_mIoU_epoch": current_miou,
+            "train_eval_epoch": epoch
+        })
+        model.train()
 
         # --- Save best model and early stopping ---
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
+        if current_val_acc > best_val_acc:
+            best_val_acc = current_val_acc
             best_epoch = epoch
             best_model_state = model.segmentation_head.state_dict()
             torch.save(
                 {"segmentation_head": best_model_state},
                 args.save_path
             )
-            print(f"New best model saved at epoch {epoch} with val acc {val_acc:.4f}")
+            print(f"New best model saved at epoch {epoch} with val acc {current_val_acc:.4f}")
             early_stop_counter = 0
-        elif val_acc < best_val_acc * 0.95:
+        elif current_val_acc < best_val_acc * 0.95:
             early_stop_counter += 1
             print(f"Validation accuracy dropped by more than 5% from best. Early stopping triggered.")
             break
@@ -381,10 +370,9 @@ def main():
     })
 
     # After creating your dataset
-    cat_ids = base_dataset.cat_id_to_index.keys()
     print(f"Number of semantic classes (excluding background): {len(cat_ids)}")
     print(f"Category IDs: {sorted(cat_ids)}")
-    print(f"Total classes including background: {len(cat_ids) + 1}")
+    print(f"Total classes including background: {num_seg_classes}")
 
 if __name__ == "__main__":
     main()
