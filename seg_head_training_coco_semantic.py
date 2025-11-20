@@ -87,7 +87,7 @@ def main():
     print(f"Using device: {device}")
 
     # Set number of classes based on --binary flag
-    num_seg_classes = 2 if args.binary else 91
+    num_seg_classes = 2 if args.binary else 81
 
     print("Initializing and loading VGGT model...")
     model = VGGT(num_seg_classes=num_seg_classes)
@@ -107,11 +107,21 @@ def main():
     train_img_dir = args.train_path
     train_ann_file = args.train_annotation_path
 
-    train_dataset = COCOSegmentation(
-        img_dir=train_img_dir,
-        ann_file=train_ann_file,
-        transforms=lambda img, msk: coco_transform(img, msk, size=(252, 252), binary=args.binary)
-    )
+    # --- Dataset initialization depending on --binary flag ---
+    if args.binary:
+        train_dataset = COCOSegmentation(
+            img_dir=train_img_dir,
+            ann_file=train_ann_file,
+            transforms=lambda img, msk: coco_transform(img, msk, size=(252, 252), binary=True),
+            return_instance_masks=False
+        )
+    else:
+        train_dataset = COCOSegmentation(
+            img_dir=train_img_dir,
+            ann_file=train_ann_file,
+            transforms=lambda img, msk: coco_transform(img, msk, size=(252, 252), binary=False),
+            return_instance_masks=False  # For semantic, still use single mask but with class indices
+        )
 
     if args.train_fraction < 1.0:
         total_len = len(train_dataset)
@@ -273,7 +283,7 @@ def main():
                         eval_pred = eval_logits.argmax(1)
                         val_correct += (eval_pred == eval_masks).float().sum().item()
                         val_total += eval_masks.numel()
-                        for cls in range(2):
+                        for cls in range(num_seg_classes):
                             pred_inds = (eval_pred == cls)
                             target_inds = (eval_masks == cls)
                             intersection = (pred_inds & target_inds).sum().item()
@@ -351,7 +361,7 @@ def main():
             pred = logits.argmax(1)
             val_correct += (pred == masks).float().sum().item()
             val_total += masks.numel()
-            for cls in range(2):
+            for cls in range(num_seg_classes):
                 pred_inds = (pred == cls)
                 target_inds = (masks == cls)
                 intersection = (pred_inds & target_inds).sum().item()
