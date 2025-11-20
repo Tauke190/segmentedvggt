@@ -23,10 +23,18 @@ from dataset import COCOSegmentation
 from torch.utils.data import Subset
 import wandb
 
+
 TRAIN_PATH = "/home/av354855/data/datasets/coco/train2017"
-TRAIN_ANN_FILE = "/home/av354855/data/datasets/coco/annotations/instances_train2017.json"
-VAL_PATH = "/home/av354855/data/datasets/coco/val2017"
-VAL_ANN_FILE = "/home/av354855/data/datasets/coco/annotations/instances_val2017.json"
+TRAIN_ANN_FILE = "/home/c3-0/datasets/coco/annotations/instances_train2017.json"
+VAL_PATH = "/home/c3-0/datasets/coco/val2017"
+VAL_ANN_FILE = "/home/c3-0/datasets/coco/annotations/instances_val2017.json"
+
+
+# TRAIN_PATH = "/home/c3-0/datasets/coco/train201"
+# TRAIN_ANN_FILE = "/home/av354855/data/datasets/coco/annotations/instances_train2017.json"
+# VAL_PATH = "/home/av354855/data/datasets/coco/val2017"
+# VAL_ANN_FILE = "/home/av354855/data/datasets/coco/annotations/instances_val2017.json"
+
 
 parser = argparse.ArgumentParser(description="VGGT segmentation head training")
 parser.add_argument("--epochs", type=int, default=50, help="Number of finetuning epochs per scene")
