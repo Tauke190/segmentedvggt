@@ -20,7 +20,7 @@ echo "Running on node: $(hostname)"
 echo "GPU info:"
 nvidia-smi
 
-cd /home/av354855/VLMtoresnet
+cd /home/av354855/segmentedvggt
 
 python -c "import torch; print('Torch', torch.__version__, 'CUDA', torch.cuda.is_available())"
 python -u seg_head_training_coco_binary.py --train_fraction 0.2 --train_path /home/c3-0/datasets/coco/train2017 --train_annotation_path /home/c3-0/datasets/coco/annotations/instances_train2017.json --val_path /home/c3-0/datasets/coco/val2017 --val_annotation_path /home/c3-0/datasets/coco/annotations/instances_val2017.json
