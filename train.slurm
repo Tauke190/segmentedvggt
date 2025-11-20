@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=seg_vggt
+#SBATCH --job-name=seg_vggt_semantic
 #SBATCH --gres=gpu:1
     #SBATCH --constraint=gmem48
 #SBATCH --cpus-per-task=8
 #SBATCH --mem-per-cpu=10G
-#SBATCH --output=seg_vggt%j.out
-#SBATCH --error=seg_vggt%j.err
-#SBATCH --time=48:00:00
+#SBATCH --output=seg_vggt_semantic%j.out
+#SBATCH --error=seg_vggt_semantic%j.err
+#SBATCH --time=72:00:00
 
 
 module load anaconda3
