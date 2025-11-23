@@ -119,10 +119,12 @@ def viser_wrapper(
             world_points = unproject_depth_map_to_segmented_point_map(
                 depth_map_seg, pred_dict["extrinsic"], pred_dict["intrinsic"]
             )
+            print("world_points shape after unprojection:", world_points.shape)
         else:
             world_points = unproject_depth_map_to_point_map(
                 depth_map, pred_dict["extrinsic"], pred_dict["intrinsic"]
             )
+        print("world_points shape after unprojection:", world_points.shape)
         conf = depth_conf
     else:
         world_points = pred_dict["world_points"]
