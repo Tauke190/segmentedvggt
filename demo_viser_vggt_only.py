@@ -470,7 +470,7 @@ def main():
     print(f"Using device: {device}")
 
     print("Initializing and loading VGGT model...")
-    model = VGGT()  # enable_segmentation=True by default in your VGGT
+    model = VGGT(num_seg_classes=81)  # enable_segmentation=True by default in your VGGT
     _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
 
     print("Loading default pretrained checkpoint...")
