@@ -138,37 +138,51 @@ def viser_wrapper(
     S, H, W, _ = world_points.shape
 
     # Flatten
-    points = world_points.reshape(-1, 3)  # Only xyz
+    if world_points.shape[-1] > 3:
+        points = world_points[..., :3].reshape(-1, 3)  # Only xyz
+    else:
+        points = world_points.reshape(-1, 3)
     # No mask channel in world_points
     colors_flat = (colors.reshape(-1, 3) * 255).astype(np.uint8)
     conf_flat = conf.reshape(-1)
 
-    # Pull seg probabilities (S,1,H,W) -> (S,H,W,1) -> (-1,)
+
+    # --- Segmentation class coloring ---
     if seg_mask_ch_first is not None:
-        seg_prob_last = np.moveaxis(seg_mask_ch_first, 1, -1).astype(np.float32)  # (S,H,W,1), values in [0,1]
-        seg_prob_flat = seg_prob_last.reshape(-1)                                  # (N,)
+        # If seg_mask_ch_first is (S,81,H,W), get class per pixel
+        seg_class = np.argmax(seg_mask_ch_first, axis=1)  # (S,H,W)
+        seg_class_flat = seg_class.reshape(-1)            # (N,)
+        # Colormap for 81 classes
+        import matplotlib.pyplot as plt
+        cmap = (plt.cm.get_cmap('tab20', 81).colors * 255).astype(np.uint8)  # (81,4)
+        cmap = cmap[:, :3]  # Drop alpha
+        seg_colors_flat = cmap[seg_class_flat]  # (N,3)
+    else:
+        seg_colors_flat = colors_flat.copy()
+
+    # Also keep original RGB colors
+    rgb_colors_flat = colors_flat.copy()
+
+    # Segmentation probability for thresholding (if available)
+    if seg_mask_ch_first is not None:
+        # If seg_mask_ch_first is (S,81,H,W), get max prob per pixel
+        seg_prob_flat = np.max(seg_mask_ch_first, axis=1).reshape(-1)
     else:
         seg_prob_flat = np.zeros((colors_flat.shape[0],), dtype=np.float32)
 
-    #---------------------->
-    # Binary highlight: only points with prob >= threshold are recolored
-    highlight_color = np.array([0, 255, 0], dtype=np.uint8)  # green
+    # GUI toggle for color mode
+    color_mode_options = ["RGB", "Segmentation"]
+    gui_color_mode = server.gui.add_dropdown(
+        "Color mode", options=color_mode_options, initial_value="Segmentation"
+    )
 
-    def make_colors_binary(thr: float) -> np.ndarray:
-        thr = float(thr)
-        seg_binary = seg_prob_flat >= thr                     # (N,)
-        out = colors_flat.copy()
-        out[seg_binary] = highlight_color                     # highlight only those >= thr
-        # Debug: how many are highlighted
-        try:
-            pct = 100.0 * seg_binary.mean()
-            print(f"Seg >= {thr:.2f}: {seg_binary.sum()}/{seg_binary.size} ({pct:.2f}%) highlighted")
-        except Exception:
-            pass
-        return out
+    def get_current_colors() -> np.ndarray:
+        if gui_color_mode.value == "Segmentation":
+            return seg_colors_flat
+        else:
+            return rgb_colors_flat
 
-    colors_with_mask = make_colors_binary(seg_threshold)
-    print("colors_with_mask shape:", colors_with_mask.shape)
+    print("seg_colors_flat shape:", seg_colors_flat.shape)
 
     # --- FIX: define cam_to_world, frame_indices, and points_centered ---
     cam_to_world = pred_dict.get("extrinsic")  # (S, 3, 4)
@@ -190,7 +204,7 @@ def viser_wrapper(
     point_cloud = server.scene.add_point_cloud(
         name="viser_pcd",
         points=points_centered[init_conf_mask],
-        colors=colors_with_mask[init_conf_mask],
+        colors=get_current_colors()[init_conf_mask],
         point_size=0.001,
         point_shape="circle",
     )
@@ -207,10 +221,10 @@ def viser_wrapper(
     gui_show_frames = server.gui.add_checkbox(
         "Show camera frames", True
     )
-    gui_seg_threshold = server.gui.add_slider(             # <--- added
+    gui_seg_threshold = server.gui.add_slider(
         "Segmentation threshold", 0.0, 1.0, step=0.01, initial_value=float(seg_threshold)
     )
-    gui_filter_by_seg = server.gui.add_checkbox(           # <--- added
+    gui_filter_by_seg = server.gui.add_checkbox(
         "Filter points by segmentation", False
     )
 
@@ -297,8 +311,8 @@ def viser_wrapper(
 
         combined_mask = conf_mask & frame_mask & seg_mask_ok
 
-        # Recompute binary-highlighted colors for current seg threshold
-        current_colors = make_colors_binary(gui_seg_threshold.value)
+        # Choose color mode
+        current_colors = get_current_colors()
 
         point_cloud.points = points_centered[combined_mask]
         point_cloud.colors = current_colors[combined_mask]
@@ -319,11 +333,16 @@ def viser_wrapper(
         for fr in frustums:
             fr.visible = gui_show_frames.value
 
-    @gui_seg_threshold.on_update                # <--- added
+
+    @gui_seg_threshold.on_update
     def _(_) -> None:
         update_point_cloud()
 
-    @gui_filter_by_seg.on_update               # <--- added
+    @gui_filter_by_seg.on_update
+    def _(_) -> None:
+        update_point_cloud()
+
+    @gui_color_mode.on_update
     def _(_) -> None:
         update_point_cloud()
 
@@ -506,12 +525,16 @@ def main():
         with torch.cuda.amp.autocast(dtype=dtype):
             predictions = model(images)
 
+
     # Build torch seg probabilities BEFORE squeezing to numpy
     seg_prob = None
     if "segmentation_logits" in predictions:
-        seg_logits = predictions["segmentation_logits"]          # [B,S,1,H,W]
-        seg_prob = torch.sigmoid(seg_logits)                     # probabilities in [0,1]
-        print("seg_prob (torch) shape:", seg_prob.shape)         # [B,S,1,H,W]
+        seg_logits = predictions["segmentation_logits"]          # [B,S,81,H,W] or [B,S,1,H,W]
+        if seg_logits.shape[2] == 1:
+            seg_prob = torch.sigmoid(seg_logits)                 # [B,S,1,H,W]
+        else:
+            seg_prob = torch.softmax(seg_logits, dim=2)          # [B,S,81,H,W]
+        print("seg_prob (torch) shape:", seg_prob.shape)
     else:
         print("No segmentation head output found.")
 
@@ -525,22 +548,20 @@ def main():
         if isinstance(predictions[key], torch.Tensor):
             predictions[key] = predictions[key].cpu().numpy().squeeze(0)  # remove batch dim
 
+
     # Also convert seg_prob to numpy (matching squeeze pattern) and store
     if seg_prob is not None:
-        seg_prob_np = seg_prob.cpu().numpy().squeeze(0)  # [S,1,H,W]
-        # Store probabilities so the viewer can blend colors with confidence
+        seg_prob_np = seg_prob.cpu().numpy().squeeze(0)  # [S,81,H,W] or [S,1,H,W]
         predictions["segmentation_logits"] = seg_prob_np
-        print("seg_prob (numpy) shape:", seg_prob_np.shape)  # [S,1,H,W]
+        print("seg_prob (numpy) shape:", seg_prob_np.shape)
 
-        # --- Save segmentation probabilities to a txt file ---
-        # Flatten to (S*H*W,) for easier viewing
-        seg_prob_flat = seg_prob_np.flatten()
+        # Save segmentation probabilities to a txt file (max prob per pixel)
+        if seg_prob_np.shape[1] > 1:
+            seg_prob_flat = np.max(seg_prob_np, axis=1).flatten()
+        else:
+            seg_prob_flat = seg_prob_np.flatten()
         np.savetxt("segmentation_probs.txt", seg_prob_flat, fmt="%.6f")
         print("Saved segmentation probabilities to segmentation_probs.txt")
-
-        # Assume seg_prob_np is (S, 81, H, W)
-        seg_class = np.argmax(seg_prob_np, axis=1)  # (S, H, W)
-        seg_class_flat = seg_class.reshape(-1)      # (N,)
 
     if args.use_point_map:
         print("Visualizing 3D points from point map")
@@ -568,9 +589,4 @@ def main():
 if __name__ == "__main__":
     main()
 
-# Generate a color map for 81 classes
-import matplotlib.pyplot as plt
-cmap = (plt.cm.get_cmap('tab20', 81).colors * 255).astype(np.uint8)  # (81, 4)
-cmap = cmap[:, :3]  # Drop alpha
 
-colors_with_mask = cmap[seg_class_flat]  # (N, 3)
