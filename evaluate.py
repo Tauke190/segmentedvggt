@@ -9,9 +9,12 @@ from PIL import Image
 import argparse
 from tqdm.auto import tqdm
 
-TEST_PATH = "/home/av354855/data/datasets/coco/test2017"
-TEST_ANN_FILE = "/home/av354855/data/datasets/coco/annotations/image_info_test2017.json"
+# TEST_PATH = "/home/av354855/data/datasets/coco/test2017"
+# TEST_ANN_FILE = "/home/av354855/data/datasets/coco/annotations/image_info_test2017.json"
 SEG_HEAD_PATH = "vggt_seg_finetuned.pt"  # Path to your trained segmentation head weights
+
+TEST_PATH = "/home/c3-0/datasets/coco/val2017"
+TEST_ANN_FILE = "/home/c3-0/datasets/coco/annotations/instances_val2017.json"
 
 def coco_transform(image, mask, size=(252, 252), binary=True):
     image = image.resize(size, Image.BILINEAR)
