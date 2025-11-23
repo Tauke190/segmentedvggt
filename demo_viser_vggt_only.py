@@ -540,6 +540,10 @@ def main():
         np.savetxt("segmentation_probs.txt", seg_prob_flat, fmt="%.6f")
         print("Saved segmentation probabilities to segmentation_probs.txt")
 
+        # Assume seg_prob_np is (S, 81, H, W)
+        seg_class = np.argmax(seg_prob_np, axis=1)  # (S, H, W)
+        seg_class_flat = seg_class.reshape(-1)      # (N,)
+
     if args.use_point_map:
         print("Visualizing 3D points from point map")
     else:
@@ -565,3 +569,10 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# Generate a color map for 81 classes
+import matplotlib.pyplot as plt
+cmap = (plt.cm.get_cmap('tab20', 81).colors * 255).astype(np.uint8)  # (81, 4)
+cmap = cmap[:, :3]  # Drop alpha
+
+colors_with_mask = cmap[seg_class_flat]  # (N, 3)
