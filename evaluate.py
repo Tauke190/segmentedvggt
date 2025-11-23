@@ -7,6 +7,7 @@ import torchvision.transforms as T
 import numpy as np
 from PIL import Image
 import argparse
+from tqdm.auto import tqdm
 
 TEST_PATH = "/home/av354855/data/datasets/coco/test2017"
 TEST_ANN_FILE = "/home/av354855/data/datasets/coco/annotations/image_info_test2017.json"
@@ -44,7 +45,7 @@ def main():
     args = parser.parse_args()
 
     binary = args.mode == "binary"
-    num_classes = 2 if binary else 91  # 91 for COCO, adjust if needed
+    num_classes = 2 if binary else 81  # 81 for COCO, adjust if needed
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
@@ -83,7 +84,7 @@ def main():
 
     print(f"Evaluating on COCO test set in {'binary' if binary else 'semantic'} mode...")
     with torch.no_grad():
-        for images, masks in test_loader:
+        for images, masks in tqdm(test_loader, desc="Evaluating", unit="batch"):
             images = images.to(device)
             masks = masks.to(device)
             out = model(images)

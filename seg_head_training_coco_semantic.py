@@ -241,11 +241,17 @@ def main():
             plt.title("Image")
             plt.axis("off")
             plt.subplot(1, 3, 2)
-            plt.imshow(gt_mask, cmap="nipy_spectral")
+            if args.binary:
+                plt.imshow(gt_mask, cmap="gray", vmin=0, vmax=1)
+            else:
+                plt.imshow(gt_mask, cmap="nipy_spectral", vmin=0, vmax=num_seg_classes-1)
             plt.title("GT Mask")
             plt.axis("off")
             plt.subplot(1, 3, 3)
-            plt.imshow(pred_mask, cmap="nipy_spectral")
+            if args.binary:
+                plt.imshow(pred_mask, cmap="gray", vmin=0, vmax=1)
+            else:
+                plt.imshow(pred_mask, cmap="nipy_spectral", vmin=0, vmax=num_seg_classes-1)
             plt.title("Predicted Mask")
             plt.axis("off")
             plt.tight_layout()
