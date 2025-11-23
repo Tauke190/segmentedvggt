@@ -105,12 +105,12 @@ def viser_wrapper(
         depth_map_seg = depth_map  # fall back
     else:
         # Move channel axis to last to match depth_map (S,H,W,1)
-        # seg_mask_ch_first: (S,1,H,W) -> (S,H,W,1)
-        seg_mask_last = np.moveaxis(seg_mask_ch_first, 1, -1).astype(depth_map.dtype)
-        print("seg_mask_last shape:", seg_mask_last.shape)  # (S,H,W,1)
+        # seg_mask_ch_first: (S,81,H,W)
+        seg_class = np.argmax(seg_mask_ch_first, axis=1)  # (S,H,W)
+        seg_class_last = seg_class[..., None].astype(depth_map.dtype)  # (S,H,W,1)
 
-        # Concatenate -> (S,H,W,2): channel 0 depth, channel 1 mask
-        depth_map_seg = np.concatenate([depth_map, seg_mask_last], axis=-1)
+        # Concatenate -> (S,H,W,2): channel 0 depth, channel 1 predicted class
+        depth_map_seg = np.concatenate([depth_map, seg_class_last], axis=-1)
         print("depth_map_seg shape:", depth_map_seg.shape)
 
     # Compute world points
@@ -138,10 +138,8 @@ def viser_wrapper(
     S, H, W, _ = world_points.shape
 
     # Flatten
-    points = world_points[..., :3].reshape(-1, 3)  # Only xyz
-    mask = world_points[..., 3].reshape(-1)        # Mask values (may be prob if passed through)
-    print("Unique values in mask:", np.unique(mask))
-
+    points = world_points.reshape(-1, 3)  # Only xyz
+    # No mask channel in world_points
     colors_flat = (colors.reshape(-1, 3) * 255).astype(np.uint8)
     conf_flat = conf.reshape(-1)
 
