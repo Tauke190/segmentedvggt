@@ -32,6 +32,21 @@ from vggt.utils.geometry import closed_form_inverse_se3, unproject_depth_map_to_
 from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 
 
+def load_with_strict_false(model, url_or_path: str):
+    if url_or_path.startswith("http"):
+        state = torch.hub.load_state_dict_from_url(url_or_path, map_location="cpu")
+    else:
+        state = torch.load(url_or_path, map_location="cpu")
+    if isinstance(state, dict) and "state_dict" in state:
+        state = state["state_dict"]
+    new_state = { (k[7:] if k.startswith("module.") else k): v for k, v in state.items() }
+    msg = model.load_state_dict(new_state, strict=False)
+    print("Loaded checkpoint with strict=False")
+    print("Missing keys:", msg.missing_keys)
+    print("Unexpected keys:", msg.unexpected_keys)
+    return msg
+
+
 def viser_wrapper(
     pred_dict: dict,
     port: int = 8080,
@@ -343,11 +358,9 @@ def main():
     print(f"Using device: {device}")
 
     print("Initializing and loading VGGT model...")
-    # model = VGGT.from_pretrained("facebook/VGGT-1B")
-
     model = VGGT(num_seg_classes=81)
     _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
-    model.load_state_dict(torch.hub.load_state_dict_from_url(_URL))
+    load_with_strict_false(model, _URL)
     # Load segmentation head weights
     seg_head_state = torch.load("checkpoints/vggt_seg_finetuned.pt", map_location="cpu")
     model.segmentation_head.load_state_dict(seg_head_state["segmentation_head"])
