@@ -18,6 +18,7 @@ from tqdm.auto import tqdm
 import viser
 import viser.transforms as viser_tf
 import cv2
+import matplotlib.pyplot as plt
 
 try:
     import onnxruntime
@@ -321,6 +322,16 @@ parser.add_argument(
     help="Path to a checkpoint with a segmentation head to load."
 )
 
+
+def overlay_mask_on_image(image, mask, alpha=0.5, num_classes=81):
+    # image: (H, W, 3), mask: (H, W)
+    if image.max() > 1.0:
+        image = image / 255.0
+    cmap = plt.get_cmap('tab20', num_classes)
+    mask_rgb = cmap(mask % num_classes)[..., :3]
+    overlay = (1 - alpha) * image + alpha * mask_rgb
+    return overlay
+
 def load_segmentation_head(model, checkpoint_path):
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
     seg_head_state = checkpoint.get("segmentation_head", None)
@@ -403,6 +414,28 @@ def main():
         seg_logits = predictions["segmentation_logits"]
         print("Segmentation logits shape:", seg_logits.shape)
         # For a batch of S images, shape is (S, num_classes, H, W)
+
+        # --- Visualization block ---
+        # Remove batch dimension if present
+        if seg_logits.ndim == 5:
+            seg_logits = seg_logits[0]  # [S, num_classes, H, W]
+            images_np = images[0].cpu().numpy()  # [S, 3, H, W]
+        else:
+            images_np = images.cpu().numpy()  # [S, 3, H, W]
+
+        seg_class = np.argmax(seg_logits, axis=1)  # [S, H, W]
+
+        for i in range(seg_class.shape[0]):
+            img = images_np[i].transpose(1, 2, 0)  # [H, W, 3]
+            mask = seg_class[i]
+            overlay = overlay_mask_on_image(img, mask, alpha=0.5, num_classes=seg_logits.shape[1])
+            plt.figure(figsize=(10, 6))
+            plt.imshow(overlay)
+            plt.axis('off')
+            plt.title(f'Segmentation Overlay Frame {i}')
+            plt.show()
+        # --- End visualization block ---
+
     else:
         print("No segmentation logits in model output.")
 
