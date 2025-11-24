@@ -62,6 +62,7 @@ def visualize_mask_on_image(image: np.ndarray, mask: np.ndarray, alpha: float = 
     plt.axis('off')
     plt.imshow(overlay)
     plt.show()
+    plt.savefig("segmentation_overlay.png")
 
 
 
