@@ -18,6 +18,8 @@ import viser
 import viser.transforms as viser_tf
 import cv2
 import matplotlib.pyplot as plt  # Add at the top if not already imported
+from PIL import Image
+
 
 
 try:
@@ -412,8 +414,6 @@ def main():
         plt.savefig("demo_viser_segmentation_example.png")
 
         # --- Save predicted masks for each image ---
-        import os
-        from PIL import Image
 
         save_dir = "predicted_masks"
         os.makedirs(save_dir, exist_ok=True)
