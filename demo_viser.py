@@ -362,7 +362,7 @@ def main():
     _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
     load_with_strict_false(model, _URL)
     # Load segmentation head weights
-    seg_head_state = torch.load("checkpoints/vggt_seg_finetuned.pt", map_location="cpu")
+    seg_head_state = torch.load("checkpoints/vggt_seg_finetuned_semantic.pt", map_location="cpu")
     model.segmentation_head.load_state_dict(seg_head_state["segmentation_head"])
 
     model.eval()
