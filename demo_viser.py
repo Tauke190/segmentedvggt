@@ -424,9 +424,7 @@ def main():
         # Remove batch dimension if present
         if seg_logits.ndim == 5:
             seg_logits = seg_logits[0]  # [S, num_classes, H, W]
-            images_np = images[0].cpu().numpy()  # [S, 3, H, W]
-        else:
-            images_np = images.cpu().numpy()  # [S, 3, H, W]
+        images_np = images.cpu().numpy()  # [S, 3, H, W]
 
         # Move to CPU and convert to numpy before using np.argmax
         seg_logits_np = seg_logits.cpu().numpy()  # [S, num_classes, H, W]
@@ -437,7 +435,6 @@ def main():
             # If channel-first, transpose; if already channel-last, skip
             if img.shape[0] == 3:
                 img = img.transpose(1, 2, 0)  # [H, W, 3]
-            # else assume already [H, W, 3]
             mask = seg_class[i]
             overlay = overlay_mask_on_image(img, mask, alpha=0.5, num_classes=seg_logits.shape[1])
             plt.figure(figsize=(10, 6))
@@ -445,7 +442,7 @@ def main():
             plt.axis('off')
             plt.title(f'Segmentation Overlay Frame {i}')
             plt.savefig(f'segmentation_overlay_frame_{i}.png')
-            plt.show()
+            # plt.show()
         # --- End visualization block ---
 
     else:
