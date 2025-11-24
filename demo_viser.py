@@ -430,6 +430,30 @@ def main():
                 mask_path = os.path.join(save_dir, f"image_{i:03d}_pred_mask.png")
             mask_img.save(mask_path)
         print(f"Saved predicted masks to {save_dir}")
+
+        # --- Visualize and save side-by-side comparison for all images ---
+        vis_dir = "predicted_visualizations"
+        os.makedirs(vis_dir, exist_ok=True)
+        for i, mask in enumerate(pred):
+            orig_img = np.array(Image.open(image_names[i]).convert("RGB"))
+            mask_np = mask.detach().cpu().numpy().astype(np.uint8)
+            mask_rgb = (cmap(mask_np)[:, :, :3] * 255).astype(np.uint8)
+
+            plt.figure(figsize=(12, 4))
+            plt.subplot(1, 2, 1)
+            plt.title("Original Image")
+            plt.imshow(orig_img)
+            plt.axis('off')
+            plt.subplot(1, 2, 2)
+            plt.title("Predicted Segmentation Mask")
+            plt.imshow(mask_rgb)
+            plt.axis('off')
+            plt.tight_layout()
+            base = os.path.splitext(os.path.basename(image_names[i]))[0]
+            vis_path = os.path.join(vis_dir, f"{base}_side_by_side.png")
+            plt.savefig(vis_path)
+            plt.close()
+        print(f"Saved side-by-side visualizations to {vis_dir}")
     # --- End segmentation mask visualization block ---
 
     print("Converting pose encoding to extrinsic and intrinsic matrices...")
