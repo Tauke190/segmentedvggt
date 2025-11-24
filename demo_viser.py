@@ -421,8 +421,15 @@ def main():
         if seg_logits.ndim == 5:
             seg_logits = seg_logits[0]  # [S, num_classes, H, W]
         images_np = images.cpu().numpy()  # [S, 3, H, W]
-        seg_logits_np = seg_logits.cpu().numpy()  # [S, num_classes, H, W]
-        seg_class = np.argmax(seg_logits_np, axis=1)  # [S, H, W]
+
+        # --- Accurate segmentation mask extraction ---
+        if seg_logits.shape[1] > 1:
+            seg_prob = torch.softmax(torch.from_numpy(seg_logits), dim=1).numpy()  # [S, num_classes, H, W]
+            seg_class = np.argmax(seg_prob, axis=1)  # [S, H, W]
+        else:
+            seg_prob = torch.sigmoid(torch.from_numpy(seg_logits)).numpy()  # [S, 1, H, W]
+            seg_class = (seg_prob > 0.5).astype(np.int32).squeeze(1)  # [S, H, W]
+        # --------------------------------------------
 
         for i in range(seg_class.shape[0]):
             img = images_np[i]
