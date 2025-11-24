@@ -428,15 +428,19 @@ def main():
         seg_class = np.argmax(seg_logits_np, axis=1)  # [S, H, W]
 
         for i in range(seg_class.shape[0]):
-            img = images_np[i].transpose(1, 2, 0)  # [H, W, 3]
+            img = images_np[i]
+            # If channel-first, transpose; if already channel-last, skip
+            if img.shape[0] == 3:
+                img = img.transpose(1, 2, 0)  # [H, W, 3]
+            # else assume already [H, W, 3]
             mask = seg_class[i]
             overlay = overlay_mask_on_image(img, mask, alpha=0.5, num_classes=seg_logits.shape[1])
             plt.figure(figsize=(10, 6))
             plt.imshow(overlay)
             plt.axis('off')
             plt.title(f'Segmentation Overlay Frame {i}')
-            plt.show()
             plt.savefig(f'segmentation_overlay_frame_{i}.png')
+            plt.show()
         # --- End visualization block ---
 
     else:
@@ -470,9 +474,6 @@ def main():
         background_mode=args.background_mode,
         mask_sky=args.mask_sky,
         image_folder=args.image_folder,
-    )
-    print("Visualization complete")
-
 
 if __name__ == "__main__":
     main()
