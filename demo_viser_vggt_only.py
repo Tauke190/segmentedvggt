@@ -455,7 +455,6 @@ def apply_sky_segmentation(conf: np.ndarray, image_folder: str) -> np.ndarray:
     print("Sky segmentation applied successfully")
     return conf
 
-
 parser = argparse.ArgumentParser(description="VGGT demo with viser for 3D visualization")
 parser.add_argument(
     "--image_folder", type=str, default="examples/kitchen/images/", help="Path to folder containing images"
@@ -592,14 +591,18 @@ def main():
         predictions["segmentation_logits"] = seg_prob_np
         print("seg_prob (numpy) shape:", seg_prob_np.shape)
 
-        # Visualize mask on top of the first image
+        # Visualize mask on top of all images
         if seg_prob_np.shape[1] > 1:
             seg_class = np.argmax(seg_prob_np, axis=1)  # (S, H, W)
         else:
             seg_class = (seg_prob_np > 0.5).astype(np.int32).squeeze(1)  # (S, H, W)
-        img0 = images[0].cpu().numpy().transpose(1, 2, 0)  # (H, W, 3)
-        mask0 = seg_class[0]
-        visualize_mask_on_image(img0, mask0)
+
+        # Visualize for all images in the batch
+        for idx in range(seg_class.shape[0]):
+            img = images[idx].cpu().numpy().transpose(1, 2, 0)  # (H, W, 3)
+            mask = seg_class[idx]
+            print(f"Visualizing segmentation mask for image {idx}")
+            visualize_mask_on_image(img, mask)
     else:
         print("Segmentation probabilities not available.")
 
