@@ -474,6 +474,7 @@ def main():
         background_mode=args.background_mode,
         mask_sky=args.mask_sky,
         image_folder=args.image_folder,
+    )
 
 if __name__ == "__main__":
     main()
