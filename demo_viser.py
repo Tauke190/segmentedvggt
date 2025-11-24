@@ -421,11 +421,9 @@ def main():
         os.makedirs(save_dir, exist_ok=True)
         for i, mask in enumerate(pred):
             mask_np = mask.detach().cpu().numpy().astype(np.uint8)
-            mask_img = Image.fromarray(mask_np)
             # Convert class indices to RGB using the colormap
             mask_rgb = (cmap(mask_np)[:, :, :3] * 255).astype(np.uint8)  # shape (H, W, 3)
             mask_img = Image.fromarray(mask_rgb)
-            mask_img.save(mask_path)
             # Optionally, use the original image name if available
             if i < len(image_names):
                 base = os.path.splitext(os.path.basename(image_names[i]))[0]
