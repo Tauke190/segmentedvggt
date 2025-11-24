@@ -366,8 +366,8 @@ def main():
 
     # Optionally load segmentation head from checkpoint
     if args.segmentation_checkpoint:
-        print(f"Loading segmentation head from {args.segmentation_checkpoint}")
-        load_segmentation_head(model, args.segmentation_checkpoint)
+        print(f"Loading segmentation head from {args.checkpoint}...")
+        load_segmentation_head(model, args.checkpoint)
 
     model.eval()
     model = model.to(device)
