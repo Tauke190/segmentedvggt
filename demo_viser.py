@@ -365,7 +365,7 @@ def main():
     model.load_state_dict(torch.hub.load_state_dict_from_url(_URL), strict=False)
 
     # Optionally load segmentation head from checkpoint
-    if args.segmentation_checkpoint:
+    if args.checkpoint:
         print(f"Loading segmentation head from {args.checkpoint}...")
         load_segmentation_head(model, args.checkpoint)
 
