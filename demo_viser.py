@@ -424,10 +424,10 @@ def main():
 
         # --- Accurate segmentation mask extraction ---
         if seg_logits.shape[1] > 1:
-            seg_prob = torch.softmax(torch.from_numpy(seg_logits), dim=1).numpy()  # [S, num_classes, H, W]
+            seg_prob = torch.softmax(seg_logits, dim=1).cpu().numpy()  # [S, num_classes, H, W]
             seg_class = np.argmax(seg_prob, axis=1)  # [S, H, W]
         else:
-            seg_prob = torch.sigmoid(torch.from_numpy(seg_logits)).numpy()  # [S, 1, H, W]
+            seg_prob = torch.sigmoid(seg_logits).cpu().numpy()  # [S, 1, H, W]
             seg_class = (seg_prob > 0.5).astype(np.int32).squeeze(1)  # [S, H, W]
         # --------------------------------------------
 
