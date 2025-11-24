@@ -169,6 +169,7 @@ class DPTHead(nn.Module):
         if self.feature_only:
             return torch.cat(all_preds, dim=1)
         else:
+            print("all_conf:", all_conf)
             return torch.cat(all_preds, dim=1), torch.cat(all_conf, dim=1)
 
     def _forward_impl(
