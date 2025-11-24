@@ -418,30 +418,30 @@ def main():
     if "segmentation_logits" in predictions:
         seg_logits = predictions["segmentation_logits"]
         print("Segmentation logits shape:", seg_logits.shape)
-        # For a batch of S images, shape is (S, num_classes, H, W)
-
-        # --- Visualization block ---
-        # Remove batch dimension if present
         if seg_logits.ndim == 5:
             seg_logits = seg_logits[0]  # [S, num_classes, H, W]
         images_np = images.cpu().numpy()  # [S, 3, H, W]
-
-        # Move to CPU and convert to numpy before using np.argmax
         seg_logits_np = seg_logits.cpu().numpy()  # [S, num_classes, H, W]
         seg_class = np.argmax(seg_logits_np, axis=1)  # [S, H, W]
 
         for i in range(seg_class.shape[0]):
             img = images_np[i]
-            # If channel-first, transpose; if already channel-last, skip
             if img.shape[0] == 3:
                 img = img.transpose(1, 2, 0)  # [H, W, 3]
             mask = seg_class[i]
-            overlay = overlay_mask_on_image(img, mask, alpha=0.5, num_classes=seg_logits.shape[1])
-            plt.figure(figsize=(10, 6))
-            plt.imshow(overlay)
+
+            # Show original and mask side by side
+            plt.figure(figsize=(12, 6))
+            plt.subplot(1, 2, 1)
+            plt.imshow(img / 255.0 if img.max() > 1.0 else img)
             plt.axis('off')
-            plt.title(f'Segmentation Overlay Frame {i}')
-            plt.savefig(f'segmentation_overlay_frame_{i}.png')
+            plt.title('Original Image')
+            plt.subplot(1, 2, 2)
+            plt.imshow(mask, cmap='tab20', vmin=0, vmax=80)
+            plt.axis('off')
+            plt.title('Segmentation Mask')
+            plt.tight_layout()
+            plt.savefig(f'segmentation_side_by_side_{i}.png')
             # plt.show()
         # --- End visualization block ---
 
