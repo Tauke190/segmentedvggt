@@ -95,7 +95,7 @@ def viser_wrapper(
     mask_sky: bool = False,
     image_folder: str = None,
     prompt: str = None,
-    seg_threshold: float = 0.5,
+    seg_threshold: float = 0.5,  # <--- added
 ):
     """
     Visualize predicted 3D points and camera poses with viser.
@@ -169,65 +169,82 @@ def viser_wrapper(
         conf = apply_sky_segmentation(conf, image_folder)
 
     # Convert images from (S, 3, H, W) to (S, H, W, 3)
-    colors = images.transpose(0, 2, 3, 1)  # (S, H, W, 3)
+    # Then flatten everything for the point cloud
+    colors = images.transpose(0, 2, 3, 1)  # now (S, H, W, 3)
     S, H, W, _ = world_points.shape
 
-    # Flatten points and colors
-    points = world_points[..., :3].reshape(-1, 3)  # Only xyz
+    # Flatten
+    if world_points.shape[-1] > 3:
+        points = world_points[..., :3].reshape(-1, 3)  # Only xyz
+    else:
+        points = world_points.reshape(-1, 3)
+    # No mask channel in world_points
     colors_flat = (colors.reshape(-1, 3) * 255).astype(np.uint8)
     conf_flat = conf.reshape(-1)
 
-    # Compute scene center and recenter
-    scene_center = np.mean(points, axis=0)
-    points_centered = points - scene_center
 
-    # Store frame indices so we can filter by frame
+    # --- Segmentation class coloring ---
+    if seg_mask_ch_first is not None:
+        # If seg_mask_ch_first is (S,81,H,W), get class per pixel
+        seg_class = np.argmax(seg_mask_ch_first, axis=1)  # (S,H,W)
+        seg_class_flat = seg_class.reshape(-1)            # (N,)
+        # Colormap for 81 classes
+        import matplotlib.pyplot as plt
+        cmap = (plt.cm.get_cmap('tab20', 81).colors * 255).astype(np.uint8)  # (81,4)
+        cmap = cmap[:, :3]  # Drop alpha
+        seg_colors_flat = cmap[seg_class_flat]  # (N,3)
+    else:
+        seg_colors_flat = colors_flat.copy()
+
+    # Also keep original RGB colors
+    rgb_colors_flat = colors_flat.copy()
+
+    # Segmentation probability for thresholding (if available)
+    if seg_mask_ch_first is not None:
+        # If seg_mask_ch_first is (S,81,H,W), get max prob per pixel
+        seg_prob_flat = np.max(seg_mask_ch_first, axis=1).reshape(-1)
+    else:
+        seg_prob_flat = np.zeros((colors_flat.shape[0],), dtype=np.float32)
+
+    # GUI toggle for color mode
+    color_mode_options = ["RGB", "Segmentation"]
+    gui_color_mode = server.gui.add_dropdown(
+        "Color mode", options=color_mode_options, initial_value="Segmentation"
+    )
+
+    def get_current_colors() -> np.ndarray:
+        if gui_color_mode.value == "Segmentation":
+            return seg_colors_flat
+        else:
+            return rgb_colors_flat
+
+    print("seg_colors_flat shape:", seg_colors_flat.shape)
+
+    # --- FIX: define cam_to_world, frame_indices, and points_centered ---
+    cam_to_world = pred_dict.get("extrinsic")  # (S, 3, 4)
+
+    # Per-point frame indices for filtering (S * H * W,)
     frame_indices = np.repeat(np.arange(S), H * W)
 
-    # Initial confidence mask
+    # Center the scene so points and camera frustums align
+    valid_pts = np.isfinite(points).all(axis=1)
+    if np.any(valid_pts):
+        center = points[valid_pts].mean(axis=0)
+    else:
+        center = np.zeros(3, dtype=points.dtype)
+    points_centered = points - center
+    # ---------------------------------------------------------------
+
     init_threshold_val = np.percentile(conf_flat, init_conf_threshold)
     init_conf_mask = (conf_flat >= init_threshold_val) & (conf_flat > 0.2)
-
-    # --- Segmentation coloring setup ---
-    seg_mask_ch_first = pred_dict.get("segmentation_logits", None)
-    seg_prob_flat = None
-    seg_class_flat = None
-    colors_with_mask = None
-
-    if seg_mask_ch_first is not None:
-        # seg_mask_ch_first: (S,81,H,W)
-        seg_prob = seg_mask_ch_first  # already softmaxed in main()
-        seg_class = np.argmax(seg_prob, axis=1)  # (S,H,W)
-        seg_class_flat = seg_class.reshape(-1)   # (S*H*W,)
-        seg_prob_flat = np.max(seg_prob, axis=1).reshape(-1)  # (S*H*W,)
-
-        # Colormap for 81 classes
-        cmap = (plt.cm.get_cmap('tab20', 81).colors)
-        class_colors = (np.array(cmap)[:, :3] * 255).astype(np.uint8)
-        colors_with_mask = class_colors[seg_class_flat]
-    else:
-        # fallback: use RGB only
-        colors_with_mask = (colors.reshape(-1, 3) * 255).astype(np.uint8)
-
-    # Add point cloud to viser (default: RGB)
     point_cloud = server.scene.add_point_cloud(
         name="viser_pcd",
         points=points_centered[init_conf_mask],
-        colors=colors_flat[init_conf_mask],
+        colors=get_current_colors()[init_conf_mask],
         point_size=0.001,
         point_shape="circle",
     )
-
-    # --- Add GUI toggle for segmentation coloring ---
-    gui_color_mode = server.gui.add_dropdown(
-        "Color mode", options=["RGB", "Segmentation"], initial_value="RGB"
-    )
-
-    def get_current_colors():
-        if gui_color_mode.value == "Segmentation" and colors_with_mask is not None:
-            return colors_with_mask
-        else:
-            return colors_flat
+    #---------------------->
 
     # GUI controls for filtering and visualization
     gui_points_conf = server.gui.add_slider(
@@ -362,7 +379,7 @@ def viser_wrapper(
         update_point_cloud()
 
     @gui_color_mode.on_update
-    def _(_):
+    def _(_) -> None:
         update_point_cloud()
 
     # Add the camera frames to the scene
@@ -441,7 +458,7 @@ def apply_sky_segmentation(conf: np.ndarray, image_folder: str) -> np.ndarray:
 
 parser = argparse.ArgumentParser(description="VGGT demo with viser for 3D visualization")
 parser.add_argument(
-    "--image_folder", type=str, default="examples/kitchen/images/", help="Path to folder containing images"
+    "--image_folder", type=str, default="examples/test/images/", help="Path to folder containing images"
 )
 parser.add_argument("--use_point_map", action="store_true", help="Use point map instead of depth-based points")
 parser.add_argument("--background_mode", action="store_true", help="Run the viser server in background mode")
@@ -470,37 +487,61 @@ def load_with_strict_false(model, url_or_path: str):
     new_state = { (k[7:] if k.startswith("module.") else k): v for k, v in state.items() }
     msg = model.load_state_dict(new_state, strict=False)
     print("Loaded checkpoint with strict=False")
-    print("Missing keys:", msg.missing_keys)
+    print("Missing keys:", msg.missing_keys)       # will include segmentation_head.*
     print("Unexpected keys:", msg.unexpected_keys)
     return msg
 
+def reinit_segmentation_head(model):
+    if model.segmentation_head is not None:
+        for m in model.segmentation_head.modules():
+            if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
 def main():
+    """
+    Main function for the VGGT demo with viser for 3D visualization.
+
+    This function:
+    1. Loads the VGGT model
+    2. Processes input images from the specified folder
+    3. Runs inference to generate 3D points and camera poses
+    4. Optionally applies sky segmentation to filter out sky points
+    5. Visualizes the results using viser
+
+    Command-line arguments:
+    --image_folder: Path to folder containing input images
+    --use_point_map: Use point map instead of depth-based points
+    --background_mode: Run the viser server in background mode
+    --port: Port number for the viser server
+    --conf_threshold: Initial percentage of low-confidence points to filter out
+    --mask_sky: Apply sky segmentation to filter out sky points
+    """
     args = parser.parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
     print("Initializing and loading VGGT model...")
-    model = VGGT(num_seg_classes=81)
+    model = VGGT(num_seg_classes=81)  # enable_segmentation=True by default in your VGGT
     _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
 
+    print("Loading default pretrained checkpoint...")
+    load_with_strict_false(model, _URL)
+
+    # reinit_segmentation_head(model)
+
+    # Optionally replace only the segmentation head from a custom checkpoint
     if args.checkpoint:
-        print(f"Loading custom checkpoint: {args.checkpoint}")
-        state = torch.load(args.checkpoint, map_location="cpu")
-        # Try to load full model state dict if possible
-        if isinstance(state, dict) and "state_dict" in state:
-            state = state["state_dict"]
-        # If only segmentation_head is present, load just that
-        if "segmentation_head" in state:
-            print("Checkpoint contains only segmentation_head. Loading into model.segmentation_head...")
-            result = model.segmentation_head.load_state_dict(state["segmentation_head"])
-            print("Segmentation head loaded. Missing keys:", result.missing_keys)
-            print("Segmentation head loaded. Unexpected keys:", result.unexpected_keys)
+        print(f"Replacing segmentation head from custom checkpoint: {args.checkpoint}")
+        checkpoint = torch.load(args.checkpoint, map_location="cpu")
+        result = model.segmentation_head.load_state_dict(checkpoint["segmentation_head"])
+        print("Segmentation head loaded. Missing keys:", result.missing_keys)
+        print("Segmentation head loaded. Unexpected keys:", result.unexpected_keys)
+        if not result.missing_keys and not result.unexpected_keys:
+            print("Segmentation head successfully replaced!")
         else:
-            print("Checkpoint contains full model weights. Loading with strict=False...")
-            load_with_strict_false(model, args.checkpoint)
-    else:
-        print("Loading default pretrained checkpoint...")
-        load_with_strict_false(model, _URL)
+            print("Segmentation head replacement had issues. See above.")
 
     model.eval()
     model = model.to(device)
@@ -551,31 +592,14 @@ def main():
         predictions["segmentation_logits"] = seg_prob_np
         print("seg_prob (numpy) shape:", seg_prob_np.shape)
 
-        # --- Visualization block: mimic evaluate.py ---
-        idx = 0  # Visualize the first image
-        img = images[idx].cpu().numpy().transpose(1, 2, 0)
-        img = (img - img.min()) / (img.max() - img.min() + 1e-8)  # Normalize for display
-
+        # Visualize mask on top of the first image
         if seg_prob_np.shape[1] > 1:
-            mask_pred = np.argmax(seg_prob_np[idx], axis=0)  # (H, W)
+            seg_class = np.argmax(seg_prob_np, axis=1)  # (S, H, W)
         else:
-            mask_pred = (seg_prob_np[idx][0] > 0.5).astype(np.int32)  # (H, W)
-
-        plt.figure(figsize=(8, 4))
-        plt.subplot(1, 2, 1)
-        plt.title("Image")
-        plt.imshow(img)
-        plt.axis('off')
-
-        plt.subplot(1, 2, 2)
-        plt.title("Predicted Mask")
-        plt.imshow(mask_pred, cmap='jet', alpha=0.7)
-        plt.axis('off')
-
-        plt.tight_layout()
-        plt.show()
-        plt.savefig("demo_predicted_mask.png")
-        # --- End visualization block ---
+            seg_class = (seg_prob_np > 0.5).astype(np.int32).squeeze(1)  # (S, H, W)
+        img0 = images[0].cpu().numpy().transpose(1, 2, 0)  # (H, W, 3)
+        mask0 = seg_class[0]
+        visualize_mask_on_image(img0, mask0)
     else:
         print("Segmentation probabilities not available.")
 
