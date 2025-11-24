@@ -8,6 +8,7 @@ import numpy as np
 from PIL import Image
 import argparse
 from tqdm.auto import tqdm
+import matplotlib.pyplot as plt  # Add at the top if not already imported
 
 # TEST_PATH = "/home/av354855/data/datasets/coco/test2017"
 # TEST_ANN_FILE = "/home/av354855/data/datasets/coco/annotations/image_info_test2017.json"
@@ -86,6 +87,7 @@ def main():
     iou_count = 0
 
     print(f"Evaluating on COCO test set in {'binary' if binary else 'semantic'} mode...")
+    visualized = False  # Add this flag before the loop
     with torch.no_grad():
         for images, masks in tqdm(test_loader, desc="Evaluating", unit="batch"):
             images = images.to(device)
@@ -115,6 +117,35 @@ def main():
                 if union > 0:
                     iou_sum += intersection / union
                     iou_count += 1
+
+            # --- Visualization block: only once, at start ---
+            if not visualized:
+                idx = np.random.randint(0, images.shape[0])
+                img = images[idx].detach().cpu().permute(1, 2, 0).numpy()
+                img = (img - img.min()) / (img.max() - img.min() + 1e-8)  # Normalize for display
+                mask_pred = pred[idx].detach().cpu().numpy()
+                mask_true = masks[idx].detach().cpu().numpy()
+
+                plt.figure(figsize=(12, 4))
+                plt.subplot(1, 3, 1)
+                plt.title("Image")
+                plt.imshow(img)
+                plt.axis('off')
+
+                plt.subplot(1, 3, 2)
+                plt.title("Predicted Mask")
+                plt.imshow(mask_pred, cmap='jet', alpha=0.7)
+                plt.axis('off')
+
+                plt.subplot(1, 3, 3)
+                plt.title("Ground Truth Mask")
+                plt.imshow(mask_true, cmap='jet', alpha=0.7)
+                plt.axis('off')
+
+                plt.tight_layout()
+                plt.show()
+                visualized = True
+            # --- End visualization block ---
 
     avg_test_loss = test_loss / len(test_loader)
     test_acc = test_correct / test_total
