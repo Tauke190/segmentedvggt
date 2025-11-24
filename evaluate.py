@@ -144,6 +144,7 @@ def main():
 
                 plt.tight_layout()
                 plt.show()
+                plt.savefig("coco_segmentation_example.png")  # Save the figure
                 visualized = True
             # --- End visualization block ---
 
