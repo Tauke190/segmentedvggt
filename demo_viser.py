@@ -423,7 +423,9 @@ def main():
         else:
             images_np = images.cpu().numpy()  # [S, 3, H, W]
 
-        seg_class = np.argmax(seg_logits, axis=1)  # [S, H, W]
+        # Move to CPU and convert to numpy before using np.argmax
+        seg_logits_np = seg_logits.cpu().numpy()  # [S, num_classes, H, W]
+        seg_class = np.argmax(seg_logits_np, axis=1)  # [S, H, W]
 
         for i in range(seg_class.shape[0]):
             img = images_np[i].transpose(1, 2, 0)  # [H, W, 3]
@@ -434,6 +436,7 @@ def main():
             plt.axis('off')
             plt.title(f'Segmentation Overlay Frame {i}')
             plt.show()
+            plt.savefig(f'segmentation_overlay_frame_{i}.png')
         # --- End visualization block ---
 
     else:
