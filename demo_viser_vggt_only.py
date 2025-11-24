@@ -95,7 +95,7 @@ def viser_wrapper(
     mask_sky: bool = False,
     image_folder: str = None,
     prompt: str = None,
-    seg_threshold: float = 0.5,  # <--- added
+    seg_threshold: float = 0.5,
 ):
     """
     Visualize predicted 3D points and camera poses with viser.
@@ -169,82 +169,65 @@ def viser_wrapper(
         conf = apply_sky_segmentation(conf, image_folder)
 
     # Convert images from (S, 3, H, W) to (S, H, W, 3)
-    # Then flatten everything for the point cloud
-    colors = images.transpose(0, 2, 3, 1)  # now (S, H, W, 3)
+    colors = images.transpose(0, 2, 3, 1)  # (S, H, W, 3)
     S, H, W, _ = world_points.shape
 
-    # Flatten
-    if world_points.shape[-1] > 3:
-        points = world_points[..., :3].reshape(-1, 3)  # Only xyz
-    else:
-        points = world_points.reshape(-1, 3)
-    # No mask channel in world_points
+    # Flatten points and colors
+    points = world_points[..., :3].reshape(-1, 3)  # Only xyz
     colors_flat = (colors.reshape(-1, 3) * 255).astype(np.uint8)
     conf_flat = conf.reshape(-1)
 
+    # Compute scene center and recenter
+    scene_center = np.mean(points, axis=0)
+    points_centered = points - scene_center
 
-    # --- Segmentation class coloring ---
-    if seg_mask_ch_first is not None:
-        # If seg_mask_ch_first is (S,81,H,W), get class per pixel
-        seg_class = np.argmax(seg_mask_ch_first, axis=1)  # (S,H,W)
-        seg_class_flat = seg_class.reshape(-1)            # (N,)
-        # Colormap for 81 classes
-        import matplotlib.pyplot as plt
-        cmap = (plt.cm.get_cmap('tab20', 81).colors * 255).astype(np.uint8)  # (81,4)
-        cmap = cmap[:, :3]  # Drop alpha
-        seg_colors_flat = cmap[seg_class_flat]  # (N,3)
-    else:
-        seg_colors_flat = colors_flat.copy()
-
-    # Also keep original RGB colors
-    rgb_colors_flat = colors_flat.copy()
-
-    # Segmentation probability for thresholding (if available)
-    if seg_mask_ch_first is not None:
-        # If seg_mask_ch_first is (S,81,H,W), get max prob per pixel
-        seg_prob_flat = np.max(seg_mask_ch_first, axis=1).reshape(-1)
-    else:
-        seg_prob_flat = np.zeros((colors_flat.shape[0],), dtype=np.float32)
-
-    # GUI toggle for color mode
-    color_mode_options = ["RGB", "Segmentation"]
-    gui_color_mode = server.gui.add_dropdown(
-        "Color mode", options=color_mode_options, initial_value="Segmentation"
-    )
-
-    def get_current_colors() -> np.ndarray:
-        if gui_color_mode.value == "Segmentation":
-            return seg_colors_flat
-        else:
-            return rgb_colors_flat
-
-    print("seg_colors_flat shape:", seg_colors_flat.shape)
-
-    # --- FIX: define cam_to_world, frame_indices, and points_centered ---
-    cam_to_world = pred_dict.get("extrinsic")  # (S, 3, 4)
-
-    # Per-point frame indices for filtering (S * H * W,)
+    # Store frame indices so we can filter by frame
     frame_indices = np.repeat(np.arange(S), H * W)
 
-    # Center the scene so points and camera frustums align
-    valid_pts = np.isfinite(points).all(axis=1)
-    if np.any(valid_pts):
-        center = points[valid_pts].mean(axis=0)
-    else:
-        center = np.zeros(3, dtype=points.dtype)
-    points_centered = points - center
-    # ---------------------------------------------------------------
-
+    # Initial confidence mask
     init_threshold_val = np.percentile(conf_flat, init_conf_threshold)
     init_conf_mask = (conf_flat >= init_threshold_val) & (conf_flat > 0.2)
+
+    # --- Segmentation coloring setup ---
+    seg_mask_ch_first = pred_dict.get("segmentation_logits", None)
+    seg_prob_flat = None
+    seg_class_flat = None
+    colors_with_mask = None
+
+    if seg_mask_ch_first is not None:
+        # seg_mask_ch_first: (S,81,H,W)
+        seg_prob = seg_mask_ch_first  # already softmaxed in main()
+        seg_class = np.argmax(seg_prob, axis=1)  # (S,H,W)
+        seg_class_flat = seg_class.reshape(-1)   # (S*H*W,)
+        seg_prob_flat = np.max(seg_prob, axis=1).reshape(-1)  # (S*H*W,)
+
+        # Colormap for 81 classes
+        cmap = (plt.cm.get_cmap('tab20', 81).colors)
+        class_colors = (np.array(cmap)[:, :3] * 255).astype(np.uint8)
+        colors_with_mask = class_colors[seg_class_flat]
+    else:
+        # fallback: use RGB only
+        colors_with_mask = (colors.reshape(-1, 3) * 255).astype(np.uint8)
+
+    # Add point cloud to viser (default: RGB)
     point_cloud = server.scene.add_point_cloud(
         name="viser_pcd",
         points=points_centered[init_conf_mask],
-        colors=get_current_colors()[init_conf_mask],
+        colors=colors_flat[init_conf_mask],
         point_size=0.001,
         point_shape="circle",
     )
-    #---------------------->
+
+    # --- Add GUI toggle for segmentation coloring ---
+    gui_color_mode = server.gui.add_dropdown(
+        "Color mode", options=["RGB", "Segmentation"], initial_value="RGB"
+    )
+
+    def get_current_colors():
+        if gui_color_mode.value == "Segmentation" and colors_with_mask is not None:
+            return colors_with_mask
+        else:
+            return colors_flat
 
     # GUI controls for filtering and visualization
     gui_points_conf = server.gui.add_slider(
@@ -379,7 +362,7 @@ def viser_wrapper(
         update_point_cloud()
 
     @gui_color_mode.on_update
-    def _(_) -> None:
+    def _(_):
         update_point_cloud()
 
     # Add the camera frames to the scene
@@ -458,7 +441,7 @@ def apply_sky_segmentation(conf: np.ndarray, image_folder: str) -> np.ndarray:
 
 parser = argparse.ArgumentParser(description="VGGT demo with viser for 3D visualization")
 parser.add_argument(
-    "--image_folder", type=str, default="examples/test/images/", help="Path to folder containing images"
+    "--image_folder", type=str, default="examples/kitchen/images/", help="Path to folder containing images"
 )
 parser.add_argument("--use_point_map", action="store_true", help="Use point map instead of depth-based points")
 parser.add_argument("--background_mode", action="store_true", help="Run the viser server in background mode")
