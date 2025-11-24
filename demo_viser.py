@@ -416,15 +416,18 @@ def main():
 
     # Print segmentation mask shape if present
     if "segmentation_logits" in predictions:
-        seg_logits = predictions["segmentation_logits"]
+        seg_logits = predictions["segmentation_logits"]  # [B, S, C, H, W] or [B, S, 1, H, W]
         print("Segmentation logits shape:", seg_logits.shape)
+        # Always work with torch tensors for softmax/sigmoid
+        if isinstance(seg_logits, np.ndarray):
+            seg_logits = torch.from_numpy(seg_logits)
         if seg_logits.ndim == 5:
-            seg_logits = seg_logits[0]  # [S, num_classes, H, W]
+            seg_logits = seg_logits.squeeze(0)  # [S, C, H, W]
         images_np = images.cpu().numpy()  # [S, 3, H, W]
 
         # --- Accurate segmentation mask extraction ---
         if seg_logits.shape[1] > 1:
-            seg_prob = torch.softmax(seg_logits, dim=1).cpu().numpy()  # [S, num_classes, H, W]
+            seg_prob = torch.softmax(seg_logits, dim=1).cpu().numpy()  # [S, C, H, W]
             seg_class = np.argmax(seg_prob, axis=1)  # [S, H, W]
         else:
             seg_prob = torch.sigmoid(seg_logits).cpu().numpy()  # [S, 1, H, W]
