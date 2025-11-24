@@ -568,14 +568,31 @@ def main():
         predictions["segmentation_logits"] = seg_prob_np
         print("seg_prob (numpy) shape:", seg_prob_np.shape)
 
-        # Visualize mask on top of the first image
+        # --- Visualization block: mimic evaluate.py ---
+        idx = 0  # Visualize the first image
+        img = images[idx].cpu().numpy().transpose(1, 2, 0)
+        img = (img - img.min()) / (img.max() - img.min() + 1e-8)  # Normalize for display
+
         if seg_prob_np.shape[1] > 1:
-            seg_class = np.argmax(seg_prob_np, axis=1)  # (S, H, W)
+            mask_pred = np.argmax(seg_prob_np[idx], axis=0)  # (H, W)
         else:
-            seg_class = (seg_prob_np > 0.5).astype(np.int32).squeeze(1)  # (S, H, W)
-        img0 = images[0].cpu().numpy().transpose(1, 2, 0)  # (H, W, 3)
-        mask0 = seg_class[0]
-        visualize_mask_on_image(img0, mask0)
+            mask_pred = (seg_prob_np[idx][0] > 0.5).astype(np.int32)  # (H, W)
+
+        plt.figure(figsize=(8, 4))
+        plt.subplot(1, 2, 1)
+        plt.title("Image")
+        plt.imshow(img)
+        plt.axis('off')
+
+        plt.subplot(1, 2, 2)
+        plt.title("Predicted Mask")
+        plt.imshow(mask_pred, cmap='jet', alpha=0.7)
+        plt.axis('off')
+
+        plt.tight_layout()
+        plt.show()
+        plt.savefig("demo_predicted_mask.png")
+        # --- End visualization block ---
     else:
         print("Segmentation probabilities not available.")
 
