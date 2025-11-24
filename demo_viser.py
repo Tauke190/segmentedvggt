@@ -13,12 +13,12 @@ from typing import List, Optional
 
 import numpy as np
 import torch
-import torch.nn as nn
 from tqdm.auto import tqdm
 import viser
 import viser.transforms as viser_tf
 import cv2
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt  # Add at the top if not already imported
+
 
 try:
     import onnxruntime
@@ -317,39 +317,7 @@ parser.add_argument(
     "--conf_threshold", type=float, default=25.0, help="Initial percentage of low-confidence points to filter out"
 )
 parser.add_argument("--mask_sky", action="store_true", help="Apply sky segmentation to filter out sky points")
-parser.add_argument(
-    "--checkpoint", type=str, default=None,
-    help="Path to a checkpoint with a segmentation head to load."
-)
 
-
-def overlay_mask_on_image(image, mask, alpha=0.5, num_classes=81):
-    # image: (H, W, 3) or (H, W), mask: (H, W)
-    if image.max() > 1.0:
-        image = image / 255.0
-    # If grayscale, convert to 3-channel
-    if image.ndim == 2:
-        image = np.stack([image]*3, axis=-1)
-    elif image.shape[2] == 1:
-        image = np.repeat(image, 3, axis=2)
-    cmap = plt.get_cmap('tab20', num_classes)
-    mask_rgb = cmap(mask % num_classes)[..., :3]
-    overlay = (1 - alpha) * image + alpha * mask_rgb
-    return overlay
-
-def load_segmentation_head(model, checkpoint_path):
-    checkpoint = torch.load(checkpoint_path, map_location="cpu")
-    seg_head_state = checkpoint.get("segmentation_head", None)
-    if seg_head_state is not None:
-        result = model.segmentation_head.load_state_dict(seg_head_state)
-        print("Segmentation head loaded. Missing keys:", result.missing_keys)
-        print("Segmentation head loaded. Unexpected keys:", result.unexpected_keys)
-    else:
-        print("No segmentation_head found in checkpoint.")
-    # Print shape of the last conv/linear layer
-    for name, module in model.segmentation_head.named_modules():
-        if isinstance(module, (nn.Conv2d, nn.Linear)):
-            print(f"Segmentation head layer '{name}' weight shape: {module.weight.shape}")
 
 def main():
     """
@@ -375,26 +343,14 @@ def main():
     print(f"Using device: {device}")
 
     print("Initializing and loading VGGT model...")
-    model = VGGT(num_seg_classes=81)  # Enable segmentation head
+    # model = VGGT.from_pretrained("facebook/VGGT-1B")
 
+    model = VGGT()
     _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
-    # Always load the full checkpoint first
-    msg = model.load_state_dict(torch.hub.load_state_dict_from_url(_URL), strict=False)
-    print("Loaded checkpoint with strict=False")
-    print("Missing keys:", msg.missing_keys)
-    print("Unexpected keys:", msg.unexpected_keys)
-
-    # Optionally load segmentation head from checkpoint
-    if args.checkpoint:
-        print(f"Loading segmentation head from {args.checkpoint}...")
-        checkpoint = torch.load(args.checkpoint, map_location="cpu")
-        seg_head_state = checkpoint.get("segmentation_head", None)
-        if seg_head_state is not None:
-            result = model.segmentation_head.load_state_dict(seg_head_state)
-            print("Segmentation head loaded. Missing keys:", result.missing_keys)
-            print("Segmentation head loaded. Unexpected keys:", result.unexpected_keys)
-        else:
-            print("No segmentation_head found in checkpoint.")
+    model.load_state_dict(torch.hub.load_state_dict_from_url(_URL))
+    # Load segmentation head weights
+    seg_head_state = torch.load("checkpoints/vggt_seg_finetuned.pt", map_location="cpu")
+    model.segmentation_head.load_state_dict(seg_head_state["segmentation_head"])
 
     model.eval()
     model = model.to(device)
@@ -414,51 +370,32 @@ def main():
         with torch.cuda.amp.autocast(dtype=dtype):
             predictions = model(images)
 
-    # Print segmentation mask shape if present
+    # --- Segmentation mask visualization block (like in evaluate.py) ---
     if "segmentation_logits" in predictions:
-        seg_logits = predictions["segmentation_logits"]  # [B, S, C, H, W] or [B, S, 1, H, W]
-        print("Segmentation logits shape:", seg_logits.shape)
-        # Always work with torch tensors for softmax/sigmoid
-        if isinstance(seg_logits, np.ndarray):
-            seg_logits = torch.from_numpy(seg_logits)
-        if seg_logits.ndim == 5:
-            seg_logits = seg_logits.squeeze(0)  # [S, C, H, W]
-        images_np = images.cpu().numpy()  # [S, 3, H, W]
-
-        # --- Accurate segmentation mask extraction ---
-        if seg_logits.shape[1] > 1:
-            seg_prob = torch.softmax(seg_logits, dim=1).cpu().numpy()  # [S, C, H, W]
-            seg_class = np.argmax(seg_prob, axis=1)  # [S, H, W]
-        else:
-            seg_prob = torch.sigmoid(seg_logits).cpu().numpy()  # [S, 1, H, W]
-            seg_class = (seg_prob > 0.5).astype(np.int32).squeeze(1)  # [S, H, W]
-        # --------------------------------------------
-
-        # --- Visualization block: only once, at start ---
-        idx = 0  # Visualize the first image in the batch
-        img = images_np[idx]
-        if img.shape[0] == 3:
-            img = img.transpose(1, 2, 0)  # [H, W, 3]
-        mask_pred = seg_class[idx]
-
-        plt.figure(figsize=(10, 4))
+        logits = predictions["segmentation_logits"]
+        if logits.dim() == 5 and logits.shape[1] == 1:
+            logits = logits.squeeze(1)
+        elif logits.dim() == 5 and logits.shape[1] > 1:
+            B, S, C, H, W = logits.shape
+            logits = logits.view(B * S, C, H, W)
+        pred = logits.argmax(1)
+        idx = np.random.randint(0, images.shape[0])
+        img = images[idx].detach().cpu().permute(1, 2, 0).numpy()
+        img = (img - img.min()) / (img.max() - img.min() + 1e-8)
+        mask_pred = pred[idx].detach().cpu().numpy()
+        plt.figure(figsize=(12, 4))
         plt.subplot(1, 2, 1)
         plt.title("Image")
-        plt.imshow(img / 255.0 if img.max() > 1.0 else img)
+        plt.imshow(img)
         plt.axis('off')
-
         plt.subplot(1, 2, 2)
         plt.title("Predicted Segmentation Mask")
-        plt.imshow(mask_pred, cmap='tab20', vmin=0, vmax=80)
+        plt.imshow(mask_pred, cmap='nipy_spectral', alpha=0.7)
         plt.axis('off')
-
         plt.tight_layout()
-        plt.savefig("segmentation_demo_example.png")
-        # plt.show()
-        # --- End visualization block ---
-
-    else:
-        print("No segmentation logits in model output.")
+        plt.show()
+        plt.savefig("demo_viser_segmentation_example.png")
+    # --- End segmentation mask visualization block ---
 
     print("Converting pose encoding to extrinsic and intrinsic matrices...")
     extrinsic, intrinsic = pose_encoding_to_extri_intri(predictions["pose_enc"], images.shape[-2:])
@@ -489,6 +426,8 @@ def main():
         mask_sky=args.mask_sky,
         image_folder=args.image_folder,
     )
+    print("Visualization complete")
+
 
 if __name__ == "__main__":
     main()
