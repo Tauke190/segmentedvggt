@@ -434,25 +434,27 @@ def main():
             seg_class = (seg_prob > 0.5).astype(np.int32).squeeze(1)  # [S, H, W]
         # --------------------------------------------
 
-        for i in range(seg_class.shape[0]):
-            img = images_np[i]
-            if img.shape[0] == 3:
-                img = img.transpose(1, 2, 0)  # [H, W, 3]
-            mask = seg_class[i]
+        # --- Visualization block: only once, at start ---
+        idx = 0  # Visualize the first image in the batch
+        img = images_np[idx]
+        if img.shape[0] == 3:
+            img = img.transpose(1, 2, 0)  # [H, W, 3]
+        mask_pred = seg_class[idx]
 
-            # Show original and mask side by side
-            plt.figure(figsize=(12, 6))
-            plt.subplot(1, 2, 1)
-            plt.imshow(img / 255.0 if img.max() > 1.0 else img)
-            plt.axis('off')
-            plt.title('Original Image')
-            plt.subplot(1, 2, 2)
-            plt.imshow(mask, cmap='tab20', vmin=0, vmax=80)
-            plt.axis('off')
-            plt.title('Segmentation Mask')
-            plt.tight_layout()
-            plt.savefig(f'segmentation_side_by_side_{i}.png')
-            # plt.show()
+        plt.figure(figsize=(10, 4))
+        plt.subplot(1, 2, 1)
+        plt.title("Image")
+        plt.imshow(img / 255.0 if img.max() > 1.0 else img)
+        plt.axis('off')
+
+        plt.subplot(1, 2, 2)
+        plt.title("Predicted Segmentation Mask")
+        plt.imshow(mask_pred, cmap='tab20', vmin=0, vmax=80)
+        plt.axis('off')
+
+        plt.tight_layout()
+        plt.savefig("segmentation_demo_example.png")
+        # plt.show()
         # --- End visualization block ---
 
     else:
