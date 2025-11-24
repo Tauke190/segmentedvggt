@@ -362,12 +362,23 @@ def main():
     model = VGGT(num_seg_classes=81)  # Enable segmentation head
 
     _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
-    model.load_state_dict(torch.hub.load_state_dict_from_url(_URL), strict=False)
+    # Always load the full checkpoint first
+    msg = model.load_state_dict(torch.hub.load_state_dict_from_url(_URL), strict=False)
+    print("Loaded checkpoint with strict=False")
+    print("Missing keys:", msg.missing_keys)
+    print("Unexpected keys:", msg.unexpected_keys)
 
     # Optionally load segmentation head from checkpoint
     if args.checkpoint:
         print(f"Loading segmentation head from {args.checkpoint}...")
-        load_segmentation_head(model, args.checkpoint)
+        checkpoint = torch.load(args.checkpoint, map_location="cpu")
+        seg_head_state = checkpoint.get("segmentation_head", None)
+        if seg_head_state is not None:
+            result = model.segmentation_head.load_state_dict(seg_head_state)
+            print("Segmentation head loaded. Missing keys:", result.missing_keys)
+            print("Segmentation head loaded. Unexpected keys:", result.unexpected_keys)
+        else:
+            print("No segmentation_head found in checkpoint.")
 
     model.eval()
     model = model.to(device)
