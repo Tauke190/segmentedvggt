@@ -168,8 +168,9 @@ class DPTHead(nn.Module):
         # Concatenate results along the sequence dimension
         if self.feature_only:
             return torch.cat(all_preds, dim=1)
+        elif not self.return_conf:
+            return torch.cat(all_preds, dim=1), None
         else:
-            print("all_conf:", all_conf)
             return torch.cat(all_preds, dim=1), torch.cat(all_conf, dim=1)
 
     def _forward_impl(
