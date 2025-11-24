@@ -32,6 +32,36 @@ from vggt.utils.load_fn import load_and_preprocess_images
 from vggt.utils.geometry import closed_form_inverse_se3, unproject_depth_map_to_point_map , unproject_depth_map_to_segmented_point_map
 from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 
+
+
+def visualize_mask_on_image(image: np.ndarray, mask: np.ndarray, alpha: float = 0.5, class_colors=None):
+    """
+    Overlay a segmentation mask on top of an image.
+
+    Args:
+        image (np.ndarray): (H, W, 3) RGB image, values in [0, 1] or [0, 255]
+        mask (np.ndarray): (H, W) integer mask (class indices)
+        alpha (float): Transparency for the mask overlay.
+        class_colors (np.ndarray): (num_classes, 3) array of RGB colors for each class.
+    """
+    if image.max() > 1.0:
+        image = image / 255.0
+    if class_colors is None:
+        # Use tab20 colormap for up to 81 classes
+        cmap = (plt.cm.get_cmap('tab20', 81).colors)
+        class_colors = np.array(cmap)[:, :3]
+    mask_rgb = class_colors[mask % len(class_colors)]
+    mask_rgb = mask_rgb[..., :3]
+    mask_rgb = mask_rgb.astype(np.float32)
+    mask_rgb = mask_rgb / mask_rgb.max()
+    overlay = (1 - alpha) * image + alpha * mask_rgb
+    plt.figure(figsize=(8, 8))
+    plt.axis('off')
+    plt.imshow(overlay)
+    plt.show()
+
+
+
 def save_point_cloud_as_ply(filename, points, colors):
     """
     Save a point cloud to a PLY file.
@@ -596,31 +626,4 @@ if __name__ == "__main__":
 
 import matplotlib.pyplot as plt
 import matplotlib
-
-def visualize_mask_on_image(image: np.ndarray, mask: np.ndarray, alpha: float = 0.5, class_colors=None):
-    """
-    Overlay a segmentation mask on top of an image.
-
-    Args:
-        image (np.ndarray): (H, W, 3) RGB image, values in [0, 1] or [0, 255]
-        mask (np.ndarray): (H, W) integer mask (class indices)
-        alpha (float): Transparency for the mask overlay.
-        class_colors (np.ndarray): (num_classes, 3) array of RGB colors for each class.
-    """
-    if image.max() > 1.0:
-        image = image / 255.0
-    if class_colors is None:
-        # Use tab20 colormap for up to 81 classes
-        cmap = (plt.cm.get_cmap('tab20', 81).colors)
-        class_colors = np.array(cmap)[:, :3]
-    mask_rgb = class_colors[mask % len(class_colors)]
-    mask_rgb = mask_rgb[..., :3]
-    mask_rgb = mask_rgb.astype(np.float32)
-    mask_rgb = mask_rgb / mask_rgb.max()
-    overlay = (1 - alpha) * image + alpha * mask_rgb
-    plt.figure(figsize=(8, 8))
-    plt.axis('off')
-    plt.imshow(overlay)
-    plt.show()
-
 
