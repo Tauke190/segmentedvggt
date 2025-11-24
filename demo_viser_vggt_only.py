@@ -487,61 +487,37 @@ def load_with_strict_false(model, url_or_path: str):
     new_state = { (k[7:] if k.startswith("module.") else k): v for k, v in state.items() }
     msg = model.load_state_dict(new_state, strict=False)
     print("Loaded checkpoint with strict=False")
-    print("Missing keys:", msg.missing_keys)       # will include segmentation_head.*
+    print("Missing keys:", msg.missing_keys)
     print("Unexpected keys:", msg.unexpected_keys)
     return msg
 
-def reinit_segmentation_head(model):
-    if model.segmentation_head is not None:
-        for m in model.segmentation_head.modules():
-            if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
-                nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
-
 def main():
-    """
-    Main function for the VGGT demo with viser for 3D visualization.
-
-    This function:
-    1. Loads the VGGT model
-    2. Processes input images from the specified folder
-    3. Runs inference to generate 3D points and camera poses
-    4. Optionally applies sky segmentation to filter out sky points
-    5. Visualizes the results using viser
-
-    Command-line arguments:
-    --image_folder: Path to folder containing input images
-    --use_point_map: Use point map instead of depth-based points
-    --background_mode: Run the viser server in background mode
-    --port: Port number for the viser server
-    --conf_threshold: Initial percentage of low-confidence points to filter out
-    --mask_sky: Apply sky segmentation to filter out sky points
-    """
     args = parser.parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
     print("Initializing and loading VGGT model...")
-    model = VGGT(num_seg_classes=81)  # enable_segmentation=True by default in your VGGT
+    model = VGGT(num_seg_classes=81)
     _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
 
-    print("Loading default pretrained checkpoint...")
-    load_with_strict_false(model, _URL)
-
-    # reinit_segmentation_head(model)
-
-    # Optionally replace only the segmentation head from a custom checkpoint
     if args.checkpoint:
-        print(f"Replacing segmentation head from custom checkpoint: {args.checkpoint}")
-        checkpoint = torch.load(args.checkpoint, map_location="cpu")
-        result = model.segmentation_head.load_state_dict(checkpoint["segmentation_head"])
-        print("Segmentation head loaded. Missing keys:", result.missing_keys)
-        print("Segmentation head loaded. Unexpected keys:", result.unexpected_keys)
-        if not result.missing_keys and not result.unexpected_keys:
-            print("Segmentation head successfully replaced!")
+        print(f"Loading custom checkpoint: {args.checkpoint}")
+        state = torch.load(args.checkpoint, map_location="cpu")
+        # Try to load full model state dict if possible
+        if isinstance(state, dict) and "state_dict" in state:
+            state = state["state_dict"]
+        # If only segmentation_head is present, load just that
+        if "segmentation_head" in state:
+            print("Checkpoint contains only segmentation_head. Loading into model.segmentation_head...")
+            result = model.segmentation_head.load_state_dict(state["segmentation_head"])
+            print("Segmentation head loaded. Missing keys:", result.missing_keys)
+            print("Segmentation head loaded. Unexpected keys:", result.unexpected_keys)
         else:
-            print("Segmentation head replacement had issues. See above.")
+            print("Checkpoint contains full model weights. Loading with strict=False...")
+            load_with_strict_false(model, args.checkpoint)
+    else:
+        print("Loading default pretrained checkpoint...")
+        load_with_strict_false(model, _URL)
 
     model.eval()
     model = model.to(device)
