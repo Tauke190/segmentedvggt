@@ -13,11 +13,11 @@ from typing import List, Optional
 
 import numpy as np
 import torch
+import torch.nn as nn
 from tqdm.auto import tqdm
 import viser
 import viser.transforms as viser_tf
 import cv2
-
 
 try:
     import onnxruntime
@@ -316,7 +316,24 @@ parser.add_argument(
     "--conf_threshold", type=float, default=25.0, help="Initial percentage of low-confidence points to filter out"
 )
 parser.add_argument("--mask_sky", action="store_true", help="Apply sky segmentation to filter out sky points")
+parser.add_argument(
+    "--checkpoint", type=str, default=None,
+    help="Path to a checkpoint with a segmentation head to load."
+)
 
+def load_segmentation_head(model, checkpoint_path):
+    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    seg_head_state = checkpoint.get("segmentation_head", None)
+    if seg_head_state is not None:
+        result = model.segmentation_head.load_state_dict(seg_head_state)
+        print("Segmentation head loaded. Missing keys:", result.missing_keys)
+        print("Segmentation head loaded. Unexpected keys:", result.unexpected_keys)
+    else:
+        print("No segmentation_head found in checkpoint.")
+    # Print shape of the last conv/linear layer
+    for name, module in model.segmentation_head.named_modules():
+        if isinstance(module, (nn.Conv2d, nn.Linear)):
+            print(f"Segmentation head layer '{name}' weight shape: {module.weight.shape}")
 
 def main():
     """
@@ -342,11 +359,15 @@ def main():
     print(f"Using device: {device}")
 
     print("Initializing and loading VGGT model...")
-    # model = VGGT.from_pretrained("facebook/VGGT-1B")
+    model = VGGT(num_seg_classes=81)  # Enable segmentation head
 
-    model = VGGT()
     _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
-    model.load_state_dict(torch.hub.load_state_dict_from_url(_URL))
+    model.load_state_dict(torch.hub.load_state_dict_from_url(_URL), strict=False)
+
+    # Optionally load segmentation head from checkpoint
+    if args.segmentation_checkpoint:
+        print(f"Loading segmentation head from {args.segmentation_checkpoint}")
+        load_segmentation_head(model, args.segmentation_checkpoint)
 
     model.eval()
     model = model.to(device)
@@ -365,6 +386,14 @@ def main():
     with torch.no_grad():
         with torch.cuda.amp.autocast(dtype=dtype):
             predictions = model(images)
+
+    # Print segmentation mask shape if present
+    if "segmentation_logits" in predictions:
+        seg_logits = predictions["segmentation_logits"]
+        print("Segmentation logits shape:", seg_logits.shape)
+        # For a batch of S images, shape is (S, num_classes, H, W)
+    else:
+        print("No segmentation logits in model output.")
 
     print("Converting pose encoding to extrinsic and intrinsic matrices...")
     extrinsic, intrinsic = pose_encoding_to_extri_intri(predictions["pose_enc"], images.shape[-2:])
