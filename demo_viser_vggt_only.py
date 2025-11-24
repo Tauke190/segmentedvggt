@@ -32,6 +32,9 @@ from vggt.utils.load_fn import load_and_preprocess_images
 from vggt.utils.geometry import closed_form_inverse_se3, unproject_depth_map_to_point_map , unproject_depth_map_to_segmented_point_map
 from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 
+import matplotlib.pyplot as plt
+import matplotlib
+
 
 
 def visualize_mask_on_image(image: np.ndarray, mask: np.ndarray, alpha: float = 0.5, class_colors=None):
@@ -623,7 +626,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-import matplotlib.pyplot as plt
-import matplotlib
 
