@@ -392,6 +392,8 @@ def main():
             B, S, C, H, W = logits.shape
             logits = logits.view(B * S, C, H, W)
         pred = logits.argmax(1)
+
+        # Visualization (unchanged)
         idx = np.random.randint(0, images.shape[0])
         img = images[idx].detach().cpu().permute(1, 2, 0).numpy()
         img = (img - img.min()) / (img.max() - img.min() + 1e-8)
@@ -408,6 +410,24 @@ def main():
         plt.tight_layout()
         plt.show()
         plt.savefig("demo_viser_segmentation_example.png")
+
+        # --- Save predicted masks for each image ---
+        import os
+        from PIL import Image
+
+        save_dir = "predicted_masks"
+        os.makedirs(save_dir, exist_ok=True)
+        for i, mask in enumerate(pred):
+            mask_np = mask.detach().cpu().numpy().astype(np.uint8)
+            mask_img = Image.fromarray(mask_np)
+            # Optionally, use the original image name if available
+            if i < len(image_names):
+                base = os.path.splitext(os.path.basename(image_names[i]))[0]
+                mask_path = os.path.join(save_dir, f"{base}_pred_mask.png")
+            else:
+                mask_path = os.path.join(save_dir, f"image_{i:03d}_pred_mask.png")
+            mask_img.save(mask_path)
+        print(f"Saved predicted masks to {save_dir}")
     # --- End segmentation mask visualization block ---
 
     print("Converting pose encoding to extrinsic and intrinsic matrices...")
