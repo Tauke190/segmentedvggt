@@ -397,34 +397,32 @@ def main():
             logits = logits.view(B * S, C, H, W)
         pred = logits.argmax(1)
 
-        # Visualization (unchanged)
+        # Visualization: original image (left) and color-coded mask (right)
         idx = np.random.randint(0, images.shape[0])
-        img = images[idx].detach().cpu().permute(1, 2, 0).numpy()
-        img = (img - img.min()) / (img.max() - img.min() + 1e-8)
+        orig_img = np.array(Image.open(image_names[idx]).convert("RGB"))
         mask_pred = pred[idx].detach().cpu().numpy()
+        mask_rgb = (cmap(mask_pred)[:, :, :3] * 255).astype(np.uint8)
+
         plt.figure(figsize=(12, 4))
         plt.subplot(1, 2, 1)
-        plt.title("Image")
-        plt.imshow(img)
+        plt.title("Original Image")
+        plt.imshow(orig_img)
         plt.axis('off')
         plt.subplot(1, 2, 2)
         plt.title("Predicted Segmentation Mask")
-        plt.imshow(mask_pred, cmap='nipy_spectral', alpha=0.7)
+        plt.imshow(mask_rgb)
         plt.axis('off')
         plt.tight_layout()
         plt.show()
         plt.savefig("demo_viser_segmentation_example.png")
 
         # --- Save predicted masks for each image ---
-
         save_dir = "predicted_masks"
         os.makedirs(save_dir, exist_ok=True)
         for i, mask in enumerate(pred):
             mask_np = mask.detach().cpu().numpy().astype(np.uint8)
-            # Convert class indices to RGB using the colormap
-            mask_rgb = (cmap(mask_np)[:, :, :3] * 255).astype(np.uint8)  # shape (H, W, 3)
+            mask_rgb = (cmap(mask_np)[:, :, :3] * 255).astype(np.uint8)
             mask_img = Image.fromarray(mask_rgb)
-            # Optionally, use the original image name if available
             if i < len(image_names):
                 base = os.path.splitext(os.path.basename(image_names[i]))[0]
                 mask_path = os.path.join(save_dir, f"{base}_pred_mask.png")
