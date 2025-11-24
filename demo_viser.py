@@ -324,9 +324,14 @@ parser.add_argument(
 
 
 def overlay_mask_on_image(image, mask, alpha=0.5, num_classes=81):
-    # image: (H, W, 3), mask: (H, W)
+    # image: (H, W, 3) or (H, W), mask: (H, W)
     if image.max() > 1.0:
         image = image / 255.0
+    # If grayscale, convert to 3-channel
+    if image.ndim == 2:
+        image = np.stack([image]*3, axis=-1)
+    elif image.shape[2] == 1:
+        image = np.repeat(image, 3, axis=2)
     cmap = plt.get_cmap('tab20', num_classes)
     mask_rgb = cmap(mask % num_classes)[..., :3]
     overlay = (1 - alpha) * image + alpha * mask_rgb
