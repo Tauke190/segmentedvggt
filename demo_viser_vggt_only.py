@@ -557,13 +557,16 @@ def main():
         predictions["segmentation_logits"] = seg_prob_np
         print("seg_prob (numpy) shape:", seg_prob_np.shape)
 
-        # Save segmentation probabilities to a txt file (max prob per pixel)
+        # Visualize mask on top of the first image
         if seg_prob_np.shape[1] > 1:
-            seg_prob_flat = np.max(seg_prob_np, axis=1).flatten()
+            seg_class = np.argmax(seg_prob_np, axis=1)  # (S, H, W)
         else:
-            seg_prob_flat = seg_prob_np.flatten()
-        np.savetxt("segmentation_probs.txt", seg_prob_flat, fmt="%.6f")
-        print("Saved segmentation probabilities to segmentation_probs.txt")
+            seg_class = (seg_prob_np > 0.5).astype(np.int32).squeeze(1)  # (S, H, W)
+        img0 = images[0].cpu().numpy().transpose(1, 2, 0)  # (H, W, 3)
+        mask0 = seg_class[0]
+        visualize_mask_on_image(img0, mask0)
+    else:
+        print("Segmentation probabilities not available.")
 
     if args.use_point_map:
         print("Visualizing 3D points from point map")
@@ -590,5 +593,34 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+import matplotlib.pyplot as plt
+import matplotlib
+
+def visualize_mask_on_image(image: np.ndarray, mask: np.ndarray, alpha: float = 0.5, class_colors=None):
+    """
+    Overlay a segmentation mask on top of an image.
+
+    Args:
+        image (np.ndarray): (H, W, 3) RGB image, values in [0, 1] or [0, 255]
+        mask (np.ndarray): (H, W) integer mask (class indices)
+        alpha (float): Transparency for the mask overlay.
+        class_colors (np.ndarray): (num_classes, 3) array of RGB colors for each class.
+    """
+    if image.max() > 1.0:
+        image = image / 255.0
+    if class_colors is None:
+        # Use tab20 colormap for up to 81 classes
+        cmap = (plt.cm.get_cmap('tab20', 81).colors)
+        class_colors = np.array(cmap)[:, :3]
+    mask_rgb = class_colors[mask % len(class_colors)]
+    mask_rgb = mask_rgb[..., :3]
+    mask_rgb = mask_rgb.astype(np.float32)
+    mask_rgb = mask_rgb / mask_rgb.max()
+    overlay = (1 - alpha) * image + alpha * mask_rgb
+    plt.figure(figsize=(8, 8))
+    plt.axis('off')
+    plt.imshow(overlay)
+    plt.show()
 
 
