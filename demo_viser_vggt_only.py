@@ -565,7 +565,8 @@ def main():
     # Build torch seg probabilities BEFORE squeezing to numpy
     seg_prob = None
     if "segmentation_logits" in predictions:
-        seg_logits = predictions["segmentation_logits"]          # [B,S,81,H,W] or [B,S,1,H,W]
+        seg_logits = predictions["segmentation_logits"]  
+        print("Segmentation logits stats:", seg_logits.min().item(), seg_logits.max().item(), seg_logits.mean().item())        # [B,S,81,H,W] or [B,S,1,H,W]
         if seg_logits.shape[2] == 1:
             seg_prob = torch.sigmoid(seg_logits)                 # [B,S,1,H,W]
         else:
