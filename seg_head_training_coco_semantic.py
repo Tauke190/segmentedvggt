@@ -27,12 +27,10 @@ TRAIN_ANN_FILE = "/home/c3-0/datasets/coco/annotations/instances_train2017.json"
 VAL_PATH = "/home/c3-0/datasets/coco/val2017"
 VAL_ANN_FILE = "/home/c3-0/datasets/coco/annotations/instances_val2017.json"
 
-
 # TRAIN_PATH = "/home/c3-0/datasets/coco/train201"
 # TRAIN_ANN_FILE = "/home/av354855/data/datasets/coco/annotations/instances_train2017.json"
 # VAL_PATH = "/home/av354855/data/datasets/coco/val2017"
 # VAL_ANN_FILE = "/home/av354855/data/datasets/coco/annotations/instances_val2017.json"
-
 
 parser = argparse.ArgumentParser(description="VGGT segmentation head training")
 parser.add_argument("--epochs", type=int, default=50, help="Number of finetuning epochs per scene")
@@ -43,7 +41,7 @@ parser.add_argument("--train_annotation_path", type=str, default=TRAIN_ANN_FILE,
 parser.add_argument("--train_fraction", type=float, default=1.0, help="Fraction of training data to use (0 < x <= 1)")
 parser.add_argument("--val_path", type=str, default=VAL_PATH, required=False, help="Path to COCO validation images directory")
 parser.add_argument("--val_annotation_path", type=str, default=VAL_ANN_FILE, required=False, help="Path to COCO validation annotation file")
-parser.add_argument("--binary", action="store_true", help="Use binary segmentation (foreground/background)")
+
 
 def load_with_strict_false(model, url_or_path: str):
     if os.path.isfile(url_or_path):
@@ -68,13 +66,11 @@ def coco_collate_fn(batch):
     masks = torch.stack([m.squeeze().long() for m in masks])
     return images, masks
 
-def coco_transform(image, mask, size=(256, 256), binary=False):
+def coco_transform(image, mask, size=(256, 256)):
     image = image.resize(size, Image.BILINEAR)
     mask = mask.resize(size, Image.NEAREST)
     image = T.ToTensor()(image)
     mask = torch.from_numpy(np.array(mask)).long()
-    if binary:
-        mask = (mask > 0).long()  # All non-background become foreground
     return image, mask
 
 def main():
@@ -82,21 +78,13 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
-    # --- Dataset initialization depending on --binary flag ---
-    if args.binary:
-        train_dataset = COCOSegmentation(
-            img_dir=args.train_path,
-            ann_file=args.train_annotation_path,
-            transforms=lambda img, msk: coco_transform(img, msk, size=(252, 252), binary=True),
-            return_instance_masks=False
-        )
-    else:
-        train_dataset = COCOSegmentation(
-            img_dir=args.train_path,
-            ann_file=args.train_annotation_path,
-            transforms=lambda img, msk: coco_transform(img, msk, size=(252, 252), binary=False),
-            return_instance_masks=False
-        )
+    # --- Dataset initialization (semantic only) ---
+    train_dataset = COCOSegmentation(
+        img_dir=args.train_path,
+        ann_file=args.train_annotation_path,
+        transforms=lambda img, msk: coco_transform(img, msk, size=(252, 252)),
+        return_instance_masks=False
+    )
 
     if args.train_fraction < 1.0:
         total_len = len(train_dataset)
@@ -135,7 +123,7 @@ def main():
     val_dataset = COCOSegmentation(
         img_dir=args.val_path,
         ann_file=args.val_annotation_path,
-        transforms=lambda img, msk: coco_transform(img, msk, size=(252, 252), binary=args.binary)
+        transforms=lambda img, msk: coco_transform(img, msk, size=(252, 252))
     )
     val_loader = DataLoader(
         val_dataset,
@@ -151,7 +139,7 @@ def main():
     else:
         base_dataset = train_dataset
     cat_ids = base_dataset.cat_id_to_index.keys()
-    num_seg_classes = 2 if args.binary else (len(cat_ids) + 1)  # 80 + 1 = 81 for COCO semantic
+    num_seg_classes = len(cat_ids) + 1  # 80 + 1 = 81 for COCO semantic
     print(f"Number of semantic classes (excluding background): {len(cat_ids)}")
     print(f"Category IDs: {sorted(cat_ids)}")
     print(f"Total classes including background: {num_seg_classes}")
@@ -184,6 +172,34 @@ def main():
         config=vars(args)
     )
 
+    # --- Visualize prediction and ground truth before training ---
+    model.eval()
+    with torch.no_grad():
+        images_vis, masks_vis = next(iter(train_loader))
+        images_vis = images_vis.to(device)
+        out_vis = model(images_vis)
+        logits_vis = out_vis["segmentation_logits"]
+        if logits_vis.dim() == 5 and logits_vis.shape[1] == 1:
+            logits_vis = logits_vis.squeeze(1)
+        elif logits_vis.dim() == 5 and logits_vis.shape[1] > 1:
+            B, S, C, H, W = logits_vis.shape
+            logits_vis = logits_vis.view(B * S, C, H, W)
+        pred_mask = logits_vis.argmax(1)[0].cpu().numpy().astype(np.uint8)
+        gt_mask = masks_vis[0].cpu().numpy().astype(np.uint8)
+        img = images_vis[0].cpu()
+        img_pil = T.ToPILImage()(img)
+        plt.figure(figsize=(8, 4))
+        plt.subplot(1, 2, 1)
+        plt.imshow(gt_mask, cmap="nipy_spectral", vmin=0, vmax=num_seg_classes-1)
+        plt.title("GT Mask (before train)")
+        plt.axis("off")
+        plt.subplot(1, 2, 2)
+        plt.imshow(pred_mask, cmap="nipy_spectral", vmin=0, vmax=num_seg_classes-1)
+        plt.title("Pred Mask (before train)")
+        plt.axis("off")
+        plt.tight_layout()
+        plt.savefig("seg_pred_vs_gt_before_training.png")
+        plt.close()
     model.train()
     for epoch in range(1, args.epochs + 1):
         epoch_loss = 0.0
@@ -241,17 +257,11 @@ def main():
             plt.title("Image")
             plt.axis("off")
             plt.subplot(1, 3, 2)
-            if args.binary:
-                plt.imshow(gt_mask, cmap="gray", vmin=0, vmax=1)
-            else:
-                plt.imshow(gt_mask, cmap="nipy_spectral", vmin=0, vmax=num_seg_classes-1)
+            plt.imshow(gt_mask, cmap="nipy_spectral", vmin=0, vmax=num_seg_classes-1)
             plt.title("GT Mask")
             plt.axis("off")
             plt.subplot(1, 3, 3)
-            if args.binary:
-                plt.imshow(pred_mask, cmap="gray", vmin=0, vmax=1)
-            else:
-                plt.imshow(pred_mask, cmap="nipy_spectral", vmin=0, vmax=num_seg_classes-1)
+            plt.imshow(pred_mask, cmap="nipy_spectral", vmin=0, vmax=num_seg_classes-1)
             plt.title("Predicted Mask")
             plt.axis("off")
             plt.tight_layout()
