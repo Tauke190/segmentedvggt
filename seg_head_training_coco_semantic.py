@@ -22,18 +22,18 @@ from dataset import COCOSegmentation
 from torch.utils.data import Subset
 import wandb
 
-TRAIN_PATH = "/home/c3-0/datasets/coco/train2017"
-TRAIN_ANN_FILE = "/home/c3-0/datasets/coco/annotations/instances_train2017.json"
-VAL_PATH = "/home/c3-0/datasets/coco/val2017"
-VAL_ANN_FILE = "/home/c3-0/datasets/coco/annotations/instances_val2017.json"
+# TRAIN_PATH = "/home/c3-0/datasets/coco/train2017"
+# TRAIN_ANN_FILE = "/home/c3-0/datasets/coco/annotations/instances_train2017.json"
+# VAL_PATH = "/home/c3-0/datasets/coco/val2017"
+# VAL_ANN_FILE = "/home/c3-0/datasets/coco/annotations/instances_val2017.json"
 
-# TRAIN_PATH = "/home/c3-0/datasets/coco/train201"
-# TRAIN_ANN_FILE = "/home/av354855/data/datasets/coco/annotations/instances_train2017.json"
-# VAL_PATH = "/home/av354855/data/datasets/coco/val2017"
-# VAL_ANN_FILE = "/home/av354855/data/datasets/coco/annotations/instances_val2017.json"
+TRAIN_PATH = "/home/c3-0/datasets/coco/train201"
+TRAIN_ANN_FILE = "/home/av354855/data/datasets/coco/annotations/instances_train2017.json"
+VAL_PATH = "/home/av354855/data/datasets/coco/val2017"
+VAL_ANN_FILE = "/home/av354855/data/datasets/coco/annotations/instances_val2017.json"
 
 parser = argparse.ArgumentParser(description="VGGT segmentation head training")
-parser.add_argument("--epochs", type=int, default=50, help="Number of finetuning epochs per scene")
+parser.add_argument("--epochs", type=int, default=10, help="Number of finetuning epochs per scene")
 parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate for finetuning")
 parser.add_argument("--save_path", type=str, default="vggt_seg_finetuned.pt", help="Where to save finetuned weights")
 parser.add_argument("--train_path", type=str, default=TRAIN_PATH, required=False, help="Path to COCO training images directory")
@@ -82,8 +82,7 @@ def main():
     train_dataset = COCOSegmentation(
         img_dir=args.train_path,
         ann_file=args.train_annotation_path,
-        transforms=lambda img, msk: coco_transform(img, msk, size=(252, 252)),
-        return_instance_masks=False
+        transforms=lambda img, msk: coco_transform(img, msk, size=(252, 252))
     )
 
     if args.train_fraction < 1.0:
