@@ -455,6 +455,7 @@ def apply_sky_segmentation(conf: np.ndarray, image_folder: str) -> np.ndarray:
     print("Sky segmentation applied successfully")
     return conf
 
+
 parser = argparse.ArgumentParser(description="VGGT demo with viser for 3D visualization")
 parser.add_argument(
     "--image_folder", type=str, default="examples/test/images/", help="Path to folder containing images"
