@@ -80,6 +80,7 @@ def coco_transform(image, mask, size=(256, 256)):
 def visualize_gt_pred(image, gt_mask, pred_mask, idx=None, num_classes=81):
     """
     Visualize original image, GT mask, and predicted mask with the same colormap.
+    Shows GT and predicted class IDs in the title.
     """
     cmap = plt.cm.get_cmap('nipy_spectral', num_classes)
     vmin, vmax = 0, num_classes - 1
@@ -92,17 +93,18 @@ def visualize_gt_pred(image, gt_mask, pred_mask, idx=None, num_classes=81):
 
     plt.subplot(1, 3, 2)
     plt.imshow(gt_mask, cmap=cmap, vmin=vmin, vmax=vmax)
-    plt.title("GT Mask")
+    gt_ids = np.unique(gt_mask)
+    plt.title(f"GT Mask\nIDs: {gt_ids.tolist()}")
     plt.axis("off")
 
     plt.subplot(1, 3, 3)
     plt.imshow(pred_mask, cmap=cmap, vmin=vmin, vmax=vmax)
-    plt.title("Predicted Mask")
+    pred_ids = np.unique(pred_mask)
+    plt.title(f"Pred Mask\nIDs: {pred_ids.tolist()}")
     plt.axis("off")
 
-    pred_classes = np.unique(pred_mask)
-    plt.suptitle(f"Predicted class IDs: {pred_classes.tolist()}", fontsize=12)
-    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.suptitle(f"GT IDs: {gt_ids.tolist()} | Pred IDs: {pred_ids.tolist()}", fontsize=12)
+    plt.tight_layout(rect=[0, 0, 1, 0.93])
     if idx is not None:
         plt.savefig(f"seg_pred_vs_gt_{idx}.png")
     plt.close()
