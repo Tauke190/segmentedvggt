@@ -411,9 +411,15 @@ def main():
     print("Running inference...")
     dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
 
+    # --- Start timing inference ---
+    start_time = time.time()
     with torch.no_grad():
         with torch.cuda.amp.autocast(dtype=dtype):
             predictions = model(images)
+    end_time = time.time()
+    inference_time = end_time - start_time
+    print(f"Inference time for producing all semantic masks: {inference_time:.3f} seconds")
+    # --- End timing inference ---
 
     # --- Segmentation mask visualization block (like in evaluate.py) ---
     if "segmentation_logits" in predictions:
@@ -443,7 +449,6 @@ def main():
         blended_colors = (alpha * mask_colors.astype(np.float32) + (1 - alpha) * orig_colors.astype(np.float32)).astype(np.uint8)
 
         predictions["blended_colors"] = blended_colors
-
 
 
         # --- Visualize and save side-by-side comparison for all images ---
