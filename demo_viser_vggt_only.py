@@ -601,9 +601,10 @@ def main():
         # Visualize for all images in the batch
         for idx in range(seg_class.shape[0]):
             img = images[idx].cpu().numpy().transpose(1, 2, 0)  # (H, W, 3)
-            mask = seg_class[idx]
-            print(f"Visualizing segmentation mask for image {idx}")
-            visualize_mask_on_image(img, mask)
+            mask_pred = seg_class[idx]
+            mask_gt = gt_masks[idx]  # <-- You need to provide this from your dataset/loader
+            print(f"Visualizing GT and predicted mask for image {idx}")
+            visualize_gt_pred(img, mask_gt, mask_pred, idx=idx)
     else:
         print("Segmentation probabilities not available.")
 
@@ -632,4 +633,40 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+import matplotlib.pyplot as plt
+
+def visualize_gt_pred(image, gt_mask, pred_mask, idx=None):
+    """
+    Visualize original image, GT mask, and predicted mask with the same colormap.
+    """
+    # Use a consistent colormap for up to 81 classes
+    cmap = plt.cm.get_cmap('tab20', 81)
+    vmin, vmax = 0, 80
+
+    plt.figure(figsize=(15, 5))
+    plt.subplot(1, 3, 1)
+    plt.title("Original Image")
+    plt.imshow(image)
+    plt.axis('off')
+
+    plt.subplot(1, 3, 2)
+    plt.title("GT Mask")
+    im_gt = plt.imshow(gt_mask, cmap=cmap, vmin=vmin, vmax=vmax)
+    plt.axis('off')
+    plt.colorbar(im_gt, fraction=0.046, pad=0.04)
+
+    plt.subplot(1, 3, 3)
+    plt.title("Predicted Mask")
+    im_pred = plt.imshow(pred_mask, cmap=cmap, vmin=vmin, vmax=vmax)
+    plt.axis('off')
+    plt.colorbar(im_pred, fraction=0.046, pad=0.04)
+
+    # Show unique predicted class IDs in the caption
+    pred_classes = np.unique(pred_mask)
+    plt.suptitle(f"Predicted class IDs: {pred_classes.tolist()}", fontsize=12)
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    if idx is not None:
+        plt.savefig(f"vis_gt_pred_{idx}.png")
+    plt.show()
 
