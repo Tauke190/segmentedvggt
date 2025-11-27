@@ -109,6 +109,48 @@ def visualize_gt_pred(image, gt_mask, pred_mask, idx=None, num_classes=81):
         plt.savefig(f"seg_pred_vs_gt_{idx}.png")
     plt.close()
 
+def evaluate_on_loader(model, loader, device, num_seg_classes, criterion=None, desc="Eval"):
+    model.eval()
+    total_loss = 0.0
+    total_correct = 0
+    total_pixels = 0
+    iou_sum = 0.0
+    iou_count = 0
+    with torch.no_grad():
+        for images, masks in tqdm(loader, desc=desc):
+            images = images.to(device)
+            masks = masks.to(device)
+            out = model(images)
+            logits = out["segmentation_logits"]
+            if logits.dim() == 5 and logits.shape[1] == 1:
+                logits = logits.squeeze(1)
+            elif logits.dim() == 5 and logits.shape[1] > 1:
+                B, S, C, H, W = logits.shape
+                logits = logits.view(B * S, C, H, W)
+            if logits.shape[-2:] != masks.shape[-2:]:
+                masks = F.interpolate(masks.unsqueeze(1).float(), size=logits.shape[-2:], mode="nearest")
+                masks = masks.squeeze(1).long()
+            if masks.ndim == 4 and masks.shape[1] == 1:
+                masks = masks.squeeze(1)
+            if criterion is not None:
+                loss = criterion(logits, masks)
+                total_loss += loss.item()
+            pred = logits.argmax(1)
+            total_correct += (pred == masks).float().sum().item()
+            total_pixels += masks.numel()
+            for cls in range(num_seg_classes):
+                pred_inds = (pred == cls)
+                target_inds = (masks == cls)
+                intersection = (pred_inds & target_inds).sum().item()
+                union = (pred_inds | target_inds).sum().item()
+                if union > 0:
+                    iou_sum += intersection / union
+                    iou_count += 1
+    avg_loss = total_loss / len(loader) if criterion is not None else None
+    acc = total_correct / total_pixels if total_pixels > 0 else 0.0
+    miou = iou_sum / iou_count if iou_count > 0 else 0.0
+    return avg_loss, acc, miou
+
 def main():
     args = parser.parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -224,6 +266,15 @@ def main():
         img = images_vis[0].cpu().numpy().transpose(1, 2, 0)
         visualize_gt_pred(img, gt_mask, pred_mask, idx="before_training", num_classes=num_seg_classes)
     model.train()
+    
+    # --- Evaluate on train_eval set before training ---
+    print("Evaluating on train_eval set before training...")
+    eval_loss, eval_acc, eval_miou = evaluate_on_loader(
+        model, train_eval_loader, device, num_seg_classes, criterion, desc="Pretrain train_eval"
+    )
+    print(f"[Pretrain train_eval] loss={eval_loss:.4f} | pixel acc={eval_acc:.4f} | mIoU={eval_miou:.4f}")
+  
+    
     for epoch in range(1, args.epochs + 1):
         epoch_loss = 0.0
         for batch_idx, (images, masks) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch}")):
