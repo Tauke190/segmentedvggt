@@ -8,14 +8,12 @@ import torchvision.transforms as T
 import matplotlib.pyplot as plt
 from dataset import COCOSegmentation
 
-
 def coco_transform(image, mask, size=(256, 256)):
     image = image.resize(size, Image.BILINEAR)
     mask = mask.resize(size, Image.NEAREST)
     image = T.ToTensor()(image)
     mask = torch.from_numpy(np.array(mask)).long()
     return image, mask
-
 
 if __name__ == "__main__":
     train_img_dir = "/home/av354855/data/datasets/coco/train2017"
@@ -48,9 +46,12 @@ if __name__ == "__main__":
     plt.title("Image")
     plt.axis("off")
 
+    # Get unique class IDs in the mask (excluding background 0 if desired)
+    class_ids = np.unique(mask_np)
+    class_ids_str = ", ".join(str(cid) for cid in class_ids if cid != 0)
     plt.subplot(1, 2, 2)
     plt.imshow(mask_np, cmap="nipy_spectral")
-    plt.title("Mask")
+    plt.title(f"Mask\nClass IDs: {class_ids_str}")
     plt.axis("off")
 
     plt.tight_layout()
