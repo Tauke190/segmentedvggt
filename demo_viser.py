@@ -461,21 +461,7 @@ def main():
         plt.tight_layout()
         plt.savefig("demo_viser_segmentation_example.png")
 
-        # --- Save predicted masks for each image ---
-        save_dir = "predicted_masks"
-        os.makedirs(save_dir, exist_ok=True)
-        for i, mask in enumerate(pred):
-            mask_np = mask.detach().cpu().numpy().astype(np.uint8)
-            mask_rgb = mask_to_rgb(mask_np, cmap)
-            mask_img = Image.fromarray(mask_rgb)
-            if i < len(image_names):
-                base = os.path.splitext(os.path.basename(image_names[i]))[0]
-                mask_path = os.path.join(save_dir, f"{base}_pred_mask.png")
-            else:
-                mask_path = os.path.join(save_dir, f"image_{i:03d}_pred_mask.png")
-            mask_img.save(mask_path)
-        print(f"Saved predicted masks to {save_dir}")
-
+    
         # --- Visualize and save side-by-side comparison for all images ---
         vis_dir = "predicted_visualizations"
         os.makedirs(vis_dir, exist_ok=True)
@@ -483,6 +469,8 @@ def main():
             orig_img = np.array(Image.open(image_names[i]).convert("RGB"))
             mask_np = mask.detach().cpu().numpy().astype(np.uint8)
             mask_rgb = mask_to_rgb(mask_np, cmap)
+            unique_classes = np.unique(mask_np)
+            class_caption = f"Predicted Segmentation Mask\nClass IDs: {', '.join(map(str, unique_classes))}"
 
             plt.figure(figsize=(12, 4))
             plt.subplot(1, 2, 1)
@@ -490,7 +478,7 @@ def main():
             plt.imshow(orig_img)
             plt.axis('off')
             plt.subplot(1, 2, 2)
-            plt.title("Predicted Segmentation Mask")
+            plt.title(class_caption)
             plt.imshow(mask_rgb)
             plt.axis('off')
             plt.tight_layout()
