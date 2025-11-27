@@ -77,6 +77,36 @@ def coco_transform(image, mask, size=(256, 256)):
     mask = torch.from_numpy(np.array(mask)).long()
     return image, mask
 
+def visualize_gt_pred(image, gt_mask, pred_mask, idx=None, num_classes=81):
+    """
+    Visualize original image, GT mask, and predicted mask with the same colormap.
+    """
+    cmap = plt.cm.get_cmap('nipy_spectral', num_classes)
+    vmin, vmax = 0, num_classes - 1
+
+    plt.figure(figsize=(12, 4))
+    plt.subplot(1, 3, 1)
+    plt.imshow(image)
+    plt.title("Image")
+    plt.axis("off")
+
+    plt.subplot(1, 3, 2)
+    plt.imshow(gt_mask, cmap=cmap, vmin=vmin, vmax=vmax)
+    plt.title("GT Mask")
+    plt.axis("off")
+
+    plt.subplot(1, 3, 3)
+    plt.imshow(pred_mask, cmap=cmap, vmin=vmin, vmax=vmax)
+    plt.title("Predicted Mask")
+    plt.axis("off")
+
+    pred_classes = np.unique(pred_mask)
+    plt.suptitle(f"Predicted class IDs: {pred_classes.tolist()}", fontsize=12)
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    if idx is not None:
+        plt.savefig(f"seg_pred_vs_gt_{idx}.png")
+    plt.close()
+
 def main():
     args = parser.parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -189,20 +219,8 @@ def main():
             logits_vis = logits_vis.view(B * S, C, H, W)
         pred_mask = logits_vis.argmax(1)[0].cpu().numpy().astype(np.uint8)
         gt_mask = masks_vis[0].cpu().numpy().astype(np.uint8)
-        img = images_vis[0].cpu()
-        img_pil = T.ToPILImage()(img)
-        plt.figure(figsize=(8, 4))
-        plt.subplot(1, 2, 1)
-        plt.imshow(gt_mask, cmap="nipy_spectral", vmin=0, vmax=num_seg_classes-1)
-        plt.title("GT Mask (before train)")
-        plt.axis("off")
-        plt.subplot(1, 2, 2)
-        plt.imshow(pred_mask, cmap="nipy_spectral", vmin=0, vmax=num_seg_classes-1)
-        plt.title("Pred Mask (before train)")
-        plt.axis("off")
-        plt.tight_layout()
-        plt.savefig("seg_pred_vs_gt_before_training.png")
-        plt.close()
+        img = images_vis[0].cpu().numpy().transpose(1, 2, 0)
+        visualize_gt_pred(img, gt_mask, pred_mask, idx="before_training", num_classes=num_seg_classes)
     model.train()
     for epoch in range(1, args.epochs + 1):
         epoch_loss = 0.0
@@ -252,24 +270,8 @@ def main():
                 logits_vis = logits_vis.view(B * S, C, H, W)
             pred_mask = logits_vis.argmax(1)[0].cpu().numpy().astype(np.uint8)
             gt_mask = masks_vis[0].cpu().numpy().astype(np.uint8)
-            img = images_vis[0].cpu()
-            img_pil = T.ToPILImage()(img)
-            plt.figure(figsize=(12, 4))
-            plt.subplot(1, 3, 1)
-            plt.imshow(img_pil)
-            plt.title("Image")
-            plt.axis("off")
-            plt.subplot(1, 3, 2)
-            plt.imshow(gt_mask, cmap="nipy_spectral", vmin=0, vmax=num_seg_classes-1)
-            plt.title("GT Mask")
-            plt.axis("off")
-            plt.subplot(1, 3, 3)
-            plt.imshow(pred_mask, cmap="nipy_spectral", vmin=0, vmax=num_seg_classes-1)
-            plt.title("Predicted Mask")
-            plt.axis("off")
-            plt.tight_layout()
-            plt.savefig(f"seg_pred_vs_gt_epoch{epoch}.png")
-            plt.close()
+            img = images_vis[0].cpu().numpy().transpose(1, 2, 0)
+            visualize_gt_pred(img, gt_mask, pred_mask, idx=f"epoch{epoch}", num_classes=num_seg_classes)
 
         # --- Evaluate on train-eval set at the end of each epoch ---
         model.eval()
@@ -393,6 +395,30 @@ def main():
     print(f"Number of semantic classes (excluding background): {len(cat_ids)}")
     print(f"Category IDs: {sorted(cat_ids)}")
     print(f"Total classes including background: {num_seg_classes}")
+
+    for epoch in range(args.epochs):
+        # --- After each epoch, visualize and save a prediction ---
+        model.eval()
+        with torch.no_grad():
+            # Get a batch from validation or training set
+            for images, masks in val_loader:  # or train_eval_subset DataLoader
+                images = images.to(device)
+                masks = masks.to(device)
+                out = model(images)
+                logits = out["segmentation_logits"]
+                pred_mask = logits.argmax(1).cpu().numpy()  # (B, H, W)
+                images_np = images.cpu().numpy().transpose(0, 2, 3, 1)  # (B, H, W, 3)
+                masks_np = masks.cpu().numpy()  # (B, H, W)
+                # Visualize the first sample in the batch
+                idx = 0
+                visualize_gt_pred(
+                    images_np[idx],
+                    masks_np[idx],
+                    pred_mask[idx],
+                    idx=f"epoch{epoch}_sample{idx}"
+                )
+                break  # Only visualize one batch per epoch
+        model.train()
 
 if __name__ == "__main__":
     main()
