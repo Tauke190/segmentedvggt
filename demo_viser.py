@@ -13,14 +13,32 @@ from typing import List, Optional
 
 import numpy as np
 import torch
+import matplotlib
 from tqdm.auto import tqdm
 import viser
 import viser.transforms as viser_tf
 import cv2
 import matplotlib.pyplot as plt  # Add at the top if not already imported
 from PIL import Image
-import matplotlib
-cmap = matplotlib.cm.get_cmap('nipy_spectral', 81)  # 81 classes
+
+def get_contrastive_colormap(num_classes=81, seed=42):
+    np.random.seed(seed)
+    # Sample at evenly spaced intervals
+    color_indices = np.linspace(0, 1, num_classes, endpoint=False)
+    # Shuffle indices for more contrast
+    np.random.shuffle(color_indices)
+    base_cmap = matplotlib.cm.get_cmap('nipy_spectral')
+    colors = base_cmap(color_indices)[:, :3]  # Ignore alpha
+    def cmap_func(idx):
+        return colors[idx % num_classes]
+    return cmap_func
+
+contrastive_cmap = get_contrastive_colormap(81)
+
+# Replace this line:
+# cmap = matplotlib.cm.get_cmap('nipy_spectral', 81)
+# With this:
+cmap = contrastive_cmap
 
 
 
@@ -54,7 +72,7 @@ def load_with_strict_false(model, url_or_path: str):
 def viser_wrapper(
     pred_dict: dict,
     port: int = 8080,
-    init_conf_threshold: float = 50.0,  # represents percentage (e.g., 50 means filter lowest 50%)
+    init_conf_threshold: float = 50.0,
     use_point_map: bool = False,
     background_mode: bool = False,
     mask_sky: bool = False,
@@ -90,10 +108,8 @@ def viser_wrapper(
     images = pred_dict["images"]  # (S, 3, H, W)
     world_points_map = pred_dict["world_points"]  # (S, H, W, 3)
     conf_map = pred_dict["world_points_conf"]  # (S, H, W)
-
     depth_map = pred_dict["depth"]  # (S, H, W, 1)
     depth_conf = pred_dict["depth_conf"]  # (S, H, W)
-
     extrinsics_cam = pred_dict["extrinsic"]  # (S, 3, 4)
     intrinsics_cam = pred_dict["intrinsic"]  # (S, 3, 3)
 
@@ -109,14 +125,19 @@ def viser_wrapper(
     if mask_sky and image_folder is not None:
         conf = apply_sky_segmentation(conf, image_folder)
 
-    # Convert images from (S, 3, H, W) to (S, H, W, 3)
-    # Then flatten everything for the point cloud
-    colors = images.transpose(0, 2, 3, 1)  # now (S, H, W, 3)
+    # Use blended colors if available, else mask, else original
+    if "blended_colors" in pred_dict:
+        colors = pred_dict["blended_colors"]  # (S, H, W, 3)
+    elif "mask_colors" in pred_dict:
+        colors = pred_dict["mask_colors"]  # (S, H, W, 3)
+    else:
+        colors = images.transpose(0, 2, 3, 1)  # (S, H, W, 3)
+
     S, H, W, _ = world_points.shape
 
     # Flatten
     points = world_points.reshape(-1, 3)
-    colors_flat = (colors.reshape(-1, 3) * 255).astype(np.uint8)
+    colors_flat = colors.reshape(-1, 3)
     conf_flat = conf.reshape(-1)
 
     cam_to_world_mat = closed_form_inverse_se3(extrinsics_cam)  # shape (S, 4, 4) typically
@@ -338,6 +359,13 @@ parser.add_argument(
 parser.add_argument("--mask_sky", action="store_true", help="Apply sky segmentation to filter out sky points")
 
 
+def mask_to_rgb(mask, cmap):
+    # cmap is a function that takes an index and returns an RGB tuple
+    mask_rgb = cmap(mask % 81)  # 81 for COCO classes
+    mask_rgb = (mask_rgb * 255).astype('uint8')
+    return mask_rgb
+
+
 def main():
     """
     Main function for the VGGT demo with viser for 3D visualization.
@@ -397,23 +425,40 @@ def main():
             logits = logits.view(B * S, C, H, W)
         pred = logits.argmax(1)
 
+        # --- Add this block to compute mask_colors for all images ---
+        mask_colors = []
+        for mask in pred:
+            mask_np = mask.detach().cpu().numpy().astype(np.uint8)
+            mask_rgb = mask_to_rgb(mask_np, cmap)
+            mask_colors.append(mask_rgb)
+        mask_colors = np.stack(mask_colors, axis=0)  # (S, H, W, 3)
+        predictions["mask_colors"] = mask_colors
+        # --- End mask_colors block ---
+
+        # Compute original image colors (S, H, W, 3)
+        orig_colors = (images.permute(0, 2, 3, 1).cpu().numpy() * 255).astype(np.uint8)  # (S, H, W, 3)
+
+        # Blend mask and original colors (adjust alpha as desired)
+        alpha = 0.5  # 0 = only original, 1 = only mask
+        blended_colors = (alpha * mask_colors.astype(np.float32) + (1 - alpha) * orig_colors.astype(np.float32)).astype(np.uint8)
+
+        predictions["blended_colors"] = blended_colors
+
         # Visualization: original image (left) and color-coded mask (right)
         idx = np.random.randint(0, images.shape[0])
         orig_img = np.array(Image.open(image_names[idx]).convert("RGB"))
         mask_pred = pred[idx].detach().cpu().numpy()
-        mask_rgb = (cmap(mask_pred)[:, :, :3] * 255).astype(np.uint8)
+        mask_rgb = mask_to_rgb(mask_pred, cmap)
 
         plt.figure(figsize=(12, 4))
         plt.subplot(1, 2, 1)
         plt.title("Original Image")
-        plt.imshow(orig_img)
         plt.axis('off')
         plt.subplot(1, 2, 2)
         plt.title("Predicted Segmentation Mask")
         plt.imshow(mask_rgb)
         plt.axis('off')
         plt.tight_layout()
-        plt.show()
         plt.savefig("demo_viser_segmentation_example.png")
 
         # --- Save predicted masks for each image ---
@@ -421,7 +466,7 @@ def main():
         os.makedirs(save_dir, exist_ok=True)
         for i, mask in enumerate(pred):
             mask_np = mask.detach().cpu().numpy().astype(np.uint8)
-            mask_rgb = (cmap(mask_np)[:, :, :3] * 255).astype(np.uint8)
+            mask_rgb = mask_to_rgb(mask_np, cmap)
             mask_img = Image.fromarray(mask_rgb)
             if i < len(image_names):
                 base = os.path.splitext(os.path.basename(image_names[i]))[0]
@@ -437,7 +482,7 @@ def main():
         for i, mask in enumerate(pred):
             orig_img = np.array(Image.open(image_names[i]).convert("RGB"))
             mask_np = mask.detach().cpu().numpy().astype(np.uint8)
-            mask_rgb = (cmap(mask_np)[:, :, :3] * 255).astype(np.uint8)
+            mask_rgb = mask_to_rgb(mask_np, cmap)
 
             plt.figure(figsize=(12, 4))
             plt.subplot(1, 2, 1)

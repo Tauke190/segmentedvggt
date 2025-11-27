@@ -37,13 +37,14 @@ import matplotlib
 
 
 
-def visualize_mask_on_image(image: np.ndarray, mask: np.ndarray, alpha: float = 0.5, class_colors=None):
+def visualize_mask_on_image(image: np.ndarray, mask: np.ndarray, idx: int, alpha: float = 0.5, class_colors=None):
     """
-    Overlay a segmentation mask on top of an image.
+    Show original image and segmentation mask overlay side by side, and save to predicted_visualization folder.
 
     Args:
         image (np.ndarray): (H, W, 3) RGB image, values in [0, 1] or [0, 255]
         mask (np.ndarray): (H, W) integer mask (class indices)
+        idx (int): Index for saving the visualization file.
         alpha (float): Transparency for the mask overlay.
         class_colors (np.ndarray): (num_classes, 3) array of RGB colors for each class.
     """
@@ -58,14 +59,22 @@ def visualize_mask_on_image(image: np.ndarray, mask: np.ndarray, alpha: float = 
     mask_rgb = mask_rgb.astype(np.float32)
     mask_rgb = mask_rgb / mask_rgb.max()
     overlay = (1 - alpha) * image + alpha * mask_rgb
-    plt.figure(figsize=(8, 8))
-    plt.axis('off')
-    plt.imshow(overlay)
-    plt.show()
-    plt.savefig("segmentation_overlay.png")
 
+    # Create side-by-side visualization
+    fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+    axes[0].imshow(image)
+    axes[0].set_title("Original Image")
+    axes[0].axis('off')
+    axes[1].imshow(overlay)
+    axes[1].set_title("Segmentation Overlay")
+    axes[1].axis('off')
 
-
+    # Create output directory if it doesn't exist
+    out_dir = "predicted_visualization"
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f"image_{idx}.png")
+    plt.savefig(out_path, bbox_inches='tight')
+    plt.close(fig)
 def save_point_cloud_as_ply(filename, points, colors):
     """
     Save a point cloud to a PLY file.
@@ -602,7 +611,7 @@ def main():
             img = images[idx].cpu().numpy().transpose(1, 2, 0)  # (H, W, 3)
             mask = seg_class[idx]
             print(f"Visualizing segmentation mask for image {idx}")
-            visualize_mask_on_image(img, mask)
+            visualize_mask_on_image(img, mask, idx)
     else:
         print("Segmentation probabilities not available.")
 
