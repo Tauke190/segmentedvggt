@@ -34,6 +34,9 @@ from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 
 import matplotlib.pyplot as plt
 import matplotlib
+from dataset.coco_dataset import COCOSegmentation
+import torchvision.transforms as T
+from PIL import Image
 
 
 
@@ -498,6 +501,13 @@ def reinit_segmentation_head(model):
                 nn.init.xavier_uniform_(m.weight)
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
+
+def coco_transform(image, mask, size=(252, 252)):
+    image = image.resize(size, Image.BILINEAR)
+    mask = mask.resize(size, Image.NEAREST)
+    image = T.ToTensor()(image)
+    mask = np.array(mask, dtype=np.int64)
+    return image, mask
 
 def main():
     """
