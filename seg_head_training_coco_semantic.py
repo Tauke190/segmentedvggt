@@ -27,7 +27,7 @@ import wandb
 # VAL_PATH = "/home/c3-0/datasets/coco/val2017"
 # VAL_ANN_FILE = "/home/c3-0/datasets/coco/annotations/instances_val2017.json"
 
-TRAIN_PATH = "//home/av354855/data/datasets/coco/train2017"
+TRAIN_PATH = "/home/av354855/data/datasets/coco/train2017"
 TRAIN_ANN_FILE = "/home/av354855/data/datasets/coco/annotations/instances_train2017.json"
 VAL_PATH = "/home/av354855/data/datasets/coco/val2017"
 VAL_ANN_FILE = "/home/av354855/data/datasets/coco/annotations/instances_val2017.json"
