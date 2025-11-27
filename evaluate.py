@@ -8,22 +8,21 @@ import numpy as np
 from PIL import Image
 import argparse
 from tqdm.auto import tqdm
-import matplotlib.pyplot as plt  # Add at the top if not already imported
+import matplotlib.pyplot as plt
 
-# TEST_PATH = "/home/av354855/data/datasets/coco/test2017"
-# TEST_ANN_FILE = "/home/av354855/data/datasets/coco/annotations/image_info_test2017.json"
-SEG_HEAD_PATH = "vggt_seg_finetuned.pt"  # Path to your trained segmentation head weights
+SEG_HEAD_PATH = "vggt_seg_finetuned.pt"
 
-TEST_PATH = "/home/c3-0/datasets/coco/val2017"
-TEST_ANN_FILE = "/home/c3-0/datasets/coco/annotations/instances_val2017.json"
+# TEST_PATH = "/home/c3-0/datasets/coco/val2017"
+# TEST_ANN_FILE = "/home/c3-0/datasets/coco/annotations/instances_val2017.json"
 
-def coco_transform(image, mask, size=(252, 252), binary=True):
+TEST_PATH = "/home/av354855/data/datasets/coco/val2017"
+TEST_ANN_FILE = "/home/av354855/data/datasets/coco/annotations/instances_val2017.json"
+
+def coco_transform(image, mask, size=(252, 252)):
     image = image.resize(size, Image.BILINEAR)
     mask = mask.resize(size, Image.NEAREST)
     image = T.ToTensor()(image)
     mask = torch.from_numpy(np.array(mask)).long()
-    if binary:
-        mask = (mask > 0).long()
     return image, mask
 
 def load_with_strict_false(model, url_or_path: str):
@@ -41,15 +40,13 @@ def load_with_strict_false(model, url_or_path: str):
     return msg
 
 def main():
-    parser = argparse.ArgumentParser(description="VGGT COCO evaluation")
-    parser.add_argument("--mode", choices=["binary", "semantic"], default="binary", help="Evaluation mode: binary or semantic")
+    parser = argparse.ArgumentParser(description="VGGT COCO semantic evaluation")
     parser.add_argument("--seg_head_path", type=str, default=SEG_HEAD_PATH, help="Path to segmentation head weights")
     parser.add_argument("--test_path", type=str, default=TEST_PATH, help="Path to COCO test images")
     parser.add_argument("--test_ann_file", type=str, default=TEST_ANN_FILE, help="Path to COCO test annotation file")
     args = parser.parse_args()
 
-    binary = args.mode == "binary"
-    num_classes = 2 if binary else 81  # 81 for COCO, adjust if needed
+    num_classes = 81  # Always use 81 for COCO semantic
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
@@ -69,7 +66,7 @@ def main():
     test_dataset = COCOSegmentation(
         img_dir=args.test_path,
         ann_file=args.test_ann_file,
-        transforms=lambda img, msk: coco_transform(img, msk, size=(252, 252), binary=binary)
+        transforms=lambda img, msk: coco_transform(img, msk, size=(252, 252))
     )
     test_loader = DataLoader(
         test_dataset,
@@ -86,8 +83,8 @@ def main():
     iou_sum = 0.0
     iou_count = 0
 
-    print(f"Evaluating on COCO test set in {'binary' if binary else 'semantic'} mode...")
-    visualized = False  # Add this flag before the loop
+    print("Evaluating on COCO test set in semantic mode (81 classes)...")
+    visualized = False
     with torch.no_grad():
         for images, masks in tqdm(test_loader, desc="Evaluating", unit="batch"):
             images = images.to(device)
@@ -118,11 +115,10 @@ def main():
                     iou_sum += intersection / union
                     iou_count += 1
 
-            # --- Visualization block: only once, at start ---
             if not visualized:
                 idx = np.random.randint(0, images.shape[0])
                 img = images[idx].detach().cpu().permute(1, 2, 0).numpy()
-                img = (img - img.min()) / (img.max() - img.min() + 1e-8)  # Normalize for display
+                img = (img - img.min()) / (img.max() - img.min() + 1e-8)
                 mask_pred = pred[idx].detach().cpu().numpy()
                 mask_true = masks[idx].detach().cpu().numpy()
 
@@ -144,9 +140,8 @@ def main():
 
                 plt.tight_layout()
                 plt.show()
-                plt.savefig("coco_segmentation_example.png")  # Save the figure
+                plt.savefig("coco_evalation_segmentation_example.png")
                 visualized = True
-            # --- End visualization block ---
 
     avg_test_loss = test_loss / len(test_loader)
     test_acc = test_correct / test_total
