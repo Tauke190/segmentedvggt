@@ -23,7 +23,7 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
                  enable_depth=True,
                  enable_track=True,
                  enable_segmentation=True,   # <-- NEW
-                 num_seg_classes=2,           # <-- NEW
+                 num_seg_classes=81,           # <-- NEW
                  ):
         super().__init__()
 
