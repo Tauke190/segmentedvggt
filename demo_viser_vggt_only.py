@@ -512,21 +512,6 @@ def coco_transform(image, mask, size=(252, 252)):
 def main():
     """
     Main function for the VGGT demo with viser for 3D visualization.
-
-    This function:
-    1. Loads the VGGT model
-    2. Processes input images from the specified folder
-    3. Runs inference to generate 3D points and camera poses
-    4. Optionally applies sky segmentation to filter out sky points
-    5. Visualizes the results using viser
-
-    Command-line arguments:
-    --image_folder: Path to folder containing input images
-    --use_point_map: Use point map instead of depth-based points
-    --background_mode: Run the viser server in background mode
-    --port: Port number for the viser server
-    --conf_threshold: Initial percentage of low-confidence points to filter out
-    --mask_sky: Apply sky segmentation to filter out sky points
     """
     args = parser.parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -538,8 +523,6 @@ def main():
 
     print("Loading default pretrained checkpoint...")
     load_with_strict_false(model, _URL)
-
-    # reinit_segmentation_head(model)
 
     # Optionally replace only the segmentation head from a custom checkpoint
     if args.checkpoint:
@@ -563,6 +546,20 @@ def main():
 
     images = load_and_preprocess_images(image_names).to(device)
     print(f"Preprocessed images shape: {images.shape}")
+
+    # ---- GT MASK LOADING (move here) ----
+    ann_file = os.path.join(os.path.dirname(args.image_folder.rstrip("/")), "annotations", "instances_val2017.json")  # Adjust if needed
+    gt_dataset = COCOSegmentation(
+        img_dir=args.image_folder,
+        ann_file=ann_file,
+        transforms=lambda img, msk: coco_transform(img, msk, size=images.shape[-2:])
+    )
+    gt_masks = []
+    for i in range(len(gt_dataset)):
+        _, mask = gt_dataset[i]
+        gt_masks.append(mask)
+    gt_masks = np.stack(gt_masks, axis=0)  # (N, H, W)
+    # -------------------------------------
 
     print("Running inference...")
     dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
@@ -679,4 +676,17 @@ def visualize_gt_pred(image, gt_mask, pred_mask, idx=None):
     if idx is not None:
         plt.savefig(f"vis_gt_pred_{idx}.png")
     plt.show()
+
+# Load GT masks using COCOSegmentation
+ann_file = os.path.join(os.path.dirname(args.image_folder.rstrip("/")), "annotations", "instances_val2017.json")  # Adjust if needed
+gt_dataset = COCOSegmentation(
+    img_dir=args.image_folder,
+    ann_file=ann_file,
+    transforms=lambda img, msk: coco_transform(img, msk, size=images.shape[-2:])
+)
+gt_masks = []
+for i in range(len(gt_dataset)):
+    _, mask = gt_dataset[i]
+    gt_masks.append(mask)
+gt_masks = np.stack(gt_masks, axis=0)  # (N, H, W)
 
