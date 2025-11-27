@@ -444,24 +444,8 @@ def main():
 
         predictions["blended_colors"] = blended_colors
 
-        # Visualization: original image (left) and color-coded mask (right)
-        idx = np.random.randint(0, images.shape[0])
-        orig_img = np.array(Image.open(image_names[idx]).convert("RGB"))
-        mask_pred = pred[idx].detach().cpu().numpy()
-        mask_rgb = mask_to_rgb(mask_pred, cmap)
 
-        plt.figure(figsize=(12, 4))
-        plt.subplot(1, 2, 1)
-        plt.title("Original Image")
-        plt.axis('off')
-        plt.subplot(1, 2, 2)
-        plt.title("Predicted Segmentation Mask")
-        plt.imshow(mask_rgb)
-        plt.axis('off')
-        plt.tight_layout()
-        plt.savefig("demo_viser_segmentation_example.png")
 
-    
         # --- Visualize and save side-by-side comparison for all images ---
         vis_dir = "predicted_visualizations"
         os.makedirs(vis_dir, exist_ok=True)
