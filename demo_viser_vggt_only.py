@@ -34,9 +34,6 @@ from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 
 import matplotlib.pyplot as plt
 import matplotlib
-from dataset.coco_dataset import COCOSegmentation
-import torchvision.transforms as T
-from PIL import Image
 
 
 
@@ -458,16 +455,9 @@ def apply_sky_segmentation(conf: np.ndarray, image_folder: str) -> np.ndarray:
     print("Sky segmentation applied successfully")
     return conf
 
-
-COCO_IMG_PATH = "/home/c3-0/datasets/coco/val2017"
-COCO_ANN_PATH = "/home/c3-0/datasets/coco/annotations/instances_val2017.json"
-
 parser = argparse.ArgumentParser(description="VGGT demo with viser for 3D visualization")
 parser.add_argument(
-    "--image_folder", type=str, default=COCO_IMG_PATH, help="Path to folder containing images"
-)
-parser.add_argument(
-    "--ann_file", type=str, default=COCO_ANN_PATH, help="Path to COCO annotation file"
+    "--image_folder", type=str, default="examples/test/images/", help="Path to folder containing images"
 )
 parser.add_argument("--use_point_map", action="store_true", help="Use point map instead of depth-based points")
 parser.add_argument("--background_mode", action="store_true", help="Run the viser server in background mode")
@@ -508,16 +498,24 @@ def reinit_segmentation_head(model):
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
 
-def coco_transform(image, mask, size=(252, 252)):
-    image = image.resize(size, Image.BILINEAR)
-    mask = mask.resize(size, Image.NEAREST)
-    image = T.ToTensor()(image)
-    mask = np.array(mask, dtype=np.int64)
-    return image, mask
-
 def main():
     """
     Main function for the VGGT demo with viser for 3D visualization.
+
+    This function:
+    1. Loads the VGGT model
+    2. Processes input images from the specified folder
+    3. Runs inference to generate 3D points and camera poses
+    4. Optionally applies sky segmentation to filter out sky points
+    5. Visualizes the results using viser
+
+    Command-line arguments:
+    --image_folder: Path to folder containing input images
+    --use_point_map: Use point map instead of depth-based points
+    --background_mode: Run the viser server in background mode
+    --port: Port number for the viser server
+    --conf_threshold: Initial percentage of low-confidence points to filter out
+    --mask_sky: Apply sky segmentation to filter out sky points
     """
     args = parser.parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -529,6 +527,8 @@ def main():
 
     print("Loading default pretrained checkpoint...")
     load_with_strict_false(model, _URL)
+
+    # reinit_segmentation_head(model)
 
     # Optionally replace only the segmentation head from a custom checkpoint
     if args.checkpoint:
@@ -553,19 +553,6 @@ def main():
     images = load_and_preprocess_images(image_names).to(device)
     print(f"Preprocessed images shape: {images.shape}")
 
-    # ---- GT MASK LOADING ----
-    gt_dataset = COCOSegmentation(
-        img_dir=args.image_folder,
-        ann_file=args.ann_file,
-        transforms=lambda img, msk: coco_transform(img, msk, size=images.shape[-2:])
-    )
-    gt_masks = []
-    for i in range(len(gt_dataset)):
-        _, mask = gt_dataset[i]
-        gt_masks.append(mask)
-    gt_masks = np.stack(gt_masks, axis=0)  # (N, H, W)
-    # -------------------------
-
     print("Running inference...")
     dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
 
@@ -573,11 +560,12 @@ def main():
         with torch.cuda.amp.autocast(dtype=dtype):
             predictions = model(images)
 
+
     # Build torch seg probabilities BEFORE squeezing to numpy
     seg_prob = None
     if "segmentation_logits" in predictions:
         seg_logits = predictions["segmentation_logits"]  
-        print("Segmentation logits stats:", seg_logits.min().item(), seg_logits.max().item(), seg_logits.mean().item())
+        print("Segmentation logits stats:", seg_logits.min().item(), seg_logits.max().item(), seg_logits.mean().item())        # [B,S,81,H,W] or [B,S,1,H,W]
         if seg_logits.shape[2] == 1:
             seg_prob = torch.sigmoid(seg_logits)                 # [B,S,1,H,W]
         else:
@@ -596,6 +584,7 @@ def main():
         if isinstance(predictions[key], torch.Tensor):
             predictions[key] = predictions[key].cpu().numpy().squeeze(0)  # remove batch dim
 
+
     # Also convert seg_prob to numpy (matching squeeze pattern) and store
     if seg_prob is not None:
         seg_prob_np = seg_prob.cpu().numpy().squeeze(0)  # [S,81,H,W] or [S,1,H,W]
@@ -611,10 +600,9 @@ def main():
         # Visualize for all images in the batch
         for idx in range(seg_class.shape[0]):
             img = images[idx].cpu().numpy().transpose(1, 2, 0)  # (H, W, 3)
-            mask_pred = seg_class[idx]
-            mask_gt = gt_masks[idx]
-            print(f"Visualizing GT and predicted mask for image {idx}")
-            visualize_gt_pred(img, mask_gt, mask_pred, idx=idx)
+            mask = seg_class[idx]
+            print(f"Visualizing segmentation mask for image {idx}")
+            visualize_mask_on_image(img, mask)
     else:
         print("Segmentation probabilities not available.")
 
@@ -640,208 +628,7 @@ def main():
     )
     print("Visualization complete")
 
-if __name__ == "__main__":
-    main()
-
-import matplotlib.pyplot as plt
-
-def visualize_gt_pred(image, gt_mask, pred_mask, idx=None):
-    """
-    Visualize original image, GT mask, and predicted mask with the same colormap.
-    """
-    # Use a consistent colormap for up to 81 classes
-    cmap = plt.cm.get_cmap('tab20', 81)
-    vmin, vmax = 0, 80
-
-    plt.figure(figsize=(15, 5))
-    plt.subplot(1, 3, 1)
-    plt.title("Original Image")
-    plt.imshow(image)
-    plt.axis('off')
-
-    plt.subplot(1, 3, 2)
-    plt.title("GT Mask")
-    im_gt = plt.imshow(gt_mask, cmap=cmap, vmin=vmin, vmax=vmax)
-    plt.axis('off')
-    plt.colorbar(im_gt, fraction=0.046, pad=0.04)
-
-    plt.subplot(1, 3, 3)
-    plt.title("Predicted Mask")
-    im_pred = plt.imshow(pred_mask, cmap=cmap, vmin=vmin, vmax=vmax)
-    plt.axis('off')
-    plt.colorbar(im_pred, fraction=0.046, pad=0.04)
-
-    # Show unique predicted class IDs in the caption
-    pred_classes = np.unique(pred_mask)
-    plt.suptitle(f"Predicted class IDs: {pred_classes.tolist()}", fontsize=12)
-    plt.tight_layout(rect=[0, 0, 1, 0.95])
-    if idx is not None:
-        plt.savefig(f"vis_gt_pred_{idx}.png")
-    plt.show()
-
-# Load GT masks using COCOSegmentation
-ann_file = os.path.join(os.path.dirname(args.image_folder.rstrip("/")), "annotations", "instances_val2017.json")  # Adjust if needed
-gt_dataset = COCOSegmentation(
-    img_dir=args.image_folder,
-    ann_file=ann_file,
-    transforms=lambda img, msk: coco_transform(img, msk, size=images.shape[-2:])
-)
-gt_masks = []
-for i in range(len(gt_dataset)):
-    _, mask = gt_dataset[i]
-    gt_masks.append(mask)
-gt_masks = np.stack(gt_masks, axis=0)  # (N, H, W)
-
-# Predefined COCO val2017 paths (edit as needed for your environment)
-COCO_IMG_PATH = "/home/c3-0/datasets/coco/val2017"
-COCO_ANN_PATH = "/home/c3-0/datasets/coco/annotations/instances_val2017.json"
-
-parser = argparse.ArgumentParser(description="VGGT demo with viser for 3D visualization")
-parser.add_argument(
-    "--image_folder", type=str, default=COCO_IMG_PATH, help="Path to folder containing images"
-)
-parser.add_argument(
-    "--ann_file", type=str, default=COCO_ANN_PATH, help="Path to COCO annotation file"
-)
-parser.add_argument("--use_point_map", action="store_true", help="Use point map instead of depth-based points")
-parser.add_argument("--background_mode", action="store_true", help="Run the viser server in background mode")
-parser.add_argument("--port", type=int, default=8080, help="Port number for the viser server")
-parser.add_argument(
-    "--conf_threshold", type=float, default=25.0, help="Initial percentage of low-confidence points to filter out"
-)
-parser.add_argument("--mask_sky", action="store_true", help="Apply sky segmentation to filter out sky points")
-parser.add_argument(
-    "--seg_threshold", type=float, default=0.5, help="Threshold for segmentation probability in [0,1]"
-)
-parser.add_argument(
-    "--checkpoint", type=str, default=None,
-    help="Path or URL to a custom VGGT checkpoint. If not set, the default pretrained 1B checkpoint is used."
-)
-
-def main():
-    """
-    Main function for the VGGT demo with viser for 3D visualization.
-    """
-    args = parser.parse_args()
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Using device: {device}")
-
-    print("Initializing and loading VGGT model...")
-    model = VGGT(num_seg_classes=81)  # enable_segmentation=True by default in your VGGT
-    _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
-
-    print("Loading default pretrained checkpoint...")
-    load_with_strict_false(model, _URL)
-
-    # Optionally replace only the segmentation head from a custom checkpoint
-    if args.checkpoint:
-        print(f"Replacing segmentation head from custom checkpoint: {args.checkpoint}")
-        checkpoint = torch.load(args.checkpoint, map_location="cpu")
-        result = model.segmentation_head.load_state_dict(checkpoint["segmentation_head"])
-        print("Segmentation head loaded. Missing keys:", result.missing_keys)
-        print("Segmentation head loaded. Unexpected keys:", result.unexpected_keys)
-        if not result.missing_keys and not result.unexpected_keys:
-            print("Segmentation head successfully replaced!")
-        else:
-            print("Segmentation head replacement had issues. See above.")
-
-    model.eval()
-    model = model.to(device)
-
-    # Use the provided image folder path
-    print(f"Loading images from {args.image_folder}...")
-    image_names = glob.glob(os.path.join(args.image_folder, "*"))
-    print(f"Found {len(image_names)} images")
-
-    images = load_and_preprocess_images(image_names).to(device)
-    print(f"Preprocessed images shape: {images.shape}")
-
-    # ---- GT MASK LOADING ----
-    gt_dataset = COCOSegmentation(
-        img_dir=args.image_folder,
-        ann_file=args.ann_file,
-        transforms=lambda img, msk: coco_transform(img, msk, size=images.shape[-2:])
-    )
-    gt_masks = []
-    for i in range(len(gt_dataset)):
-        _, mask = gt_dataset[i]
-        gt_masks.append(mask)
-    gt_masks = np.stack(gt_masks, axis=0)  # (N, H, W)
-    # -------------------------
-
-    print("Running inference...")
-    dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
-
-    with torch.no_grad():
-        with torch.cuda.amp.autocast(dtype=dtype):
-            predictions = model(images)
-
-    # Build torch seg probabilities BEFORE squeezing to numpy
-    seg_prob = None
-    if "segmentation_logits" in predictions:
-        seg_logits = predictions["segmentation_logits"]  
-        print("Segmentation logits stats:", seg_logits.min().item(), seg_logits.max().item(), seg_logits.mean().item())
-        if seg_logits.shape[2] == 1:
-            seg_prob = torch.sigmoid(seg_logits)                 # [B,S,1,H,W]
-        else:
-            seg_prob = torch.softmax(seg_logits, dim=2)          # [B,S,81,H,W]
-        print("seg_prob (torch) shape:", seg_prob.shape)
-    else:
-        print("No segmentation head output found.")
-
-    print("Converting pose encoding to extrinsic and intrinsic matrices...")
-    extrinsic, intrinsic = pose_encoding_to_extri_intri(predictions["pose_enc"], images.shape[-2:])
-    predictions["extrinsic"] = extrinsic
-    predictions["intrinsic"] = intrinsic
-
-    print("Processing model outputs...")
-    for key in predictions.keys():
-        if isinstance(predictions[key], torch.Tensor):
-            predictions[key] = predictions[key].cpu().numpy().squeeze(0)  # remove batch dim
-
-    # Also convert seg_prob to numpy (matching squeeze pattern) and store
-    if seg_prob is not None:
-        seg_prob_np = seg_prob.cpu().numpy().squeeze(0)  # [S,81,H,W] or [S,1,H,W]
-        predictions["segmentation_logits"] = seg_prob_np
-        print("seg_prob (numpy) shape:", seg_prob_np.shape)
-
-        # Visualize mask on top of all images
-        if seg_prob_np.shape[1] > 1:
-            seg_class = np.argmax(seg_prob_np, axis=1)  # (S, H, W)
-        else:
-            seg_class = (seg_prob_np > 0.5).astype(np.int32).squeeze(1)  # (S, H, W)
-
-        # Visualize for all images in the batch
-        for idx in range(seg_class.shape[0]):
-            img = images[idx].cpu().numpy().transpose(1, 2, 0)  # (H, W, 3)
-            mask_pred = seg_class[idx]
-            mask_gt = gt_masks[idx]
-            print(f"Visualizing GT and predicted mask for image {idx}")
-            visualize_gt_pred(img, mask_gt, mask_pred, idx=idx)
-    else:
-        print("Segmentation probabilities not available.")
-
-    if args.use_point_map:
-        print("Visualizing 3D points from point map")
-    else:
-        print("Visualizing 3D points by unprojecting depth map by cameras")
-
-    if args.mask_sky:
-        print("Sky segmentation enabled - will filter out sky points")
-
-    print("Starting viser visualization...")
-
-    viser_server = viser_wrapper(
-        predictions,
-        port=args.port,
-        init_conf_threshold=args.conf_threshold,
-        use_point_map=args.use_point_map,
-        background_mode=args.background_mode,
-        mask_sky=args.mask_sky,
-        image_folder=args.image_folder,
-        seg_threshold=args.seg_threshold,
-    )
-    print("Visualization complete")
 
 if __name__ == "__main__":
     main()
+
