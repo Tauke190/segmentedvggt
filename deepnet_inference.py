@@ -12,13 +12,12 @@ import argparse
 # Argument parsing
 parser = argparse.ArgumentParser(description='DeepLabV3+ Inference Script')
 parser.add_argument('--input_images', type=str, default='examples/cup/images', help='Path to input images folder')
-parser.add_argument('--output_folder', type=str, default=None, help='(Optional) Path to save predicted masks. If not set, masks will not be saved.')
+
 args = parser.parse_args()
 
 input_folder = args.input_images
-output_folder = args.output_folder
-if output_folder:
-    os.makedirs(output_folder, exist_ok=True)
+output_folder = 'predicted_masks'
+os.makedirs(output_folder, exist_ok=True)
 
 # Device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -49,10 +48,9 @@ for img_name in image_files:
     with torch.no_grad():
         output = model(input_tensor)['out'][0]
     mask = output.argmax(0).byte().cpu().numpy()
-    # Save mask as PNG if output_folder is set
-    if output_folder:
-        mask_img = Image.fromarray(mask)
-        mask_img.save(os.path.join(output_folder, f"{os.path.splitext(img_name)[0]}_mask.png"))
+    # Save mask as PNG in output_folder
+    mask_img = Image.fromarray(mask)
+    mask_img.save(os.path.join(output_folder, f"{os.path.splitext(img_name)[0]}_mask.png"))
     # Print unique class IDs as caption
     unique_classes = np.unique(mask)
     print(f"{img_name}: Predicted class IDs: {unique_classes}")
