@@ -30,7 +30,6 @@ preprocess = transforms.Compose([
 
 # Get 15 image paths
 image_files = [f for f in os.listdir(input_folder) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-image_files = image_files[:1]
 
 # Inference and timing
 start_time = time.time()
