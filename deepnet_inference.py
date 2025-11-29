@@ -1,3 +1,4 @@
+
 import os
 import time
 import torch
@@ -5,11 +6,19 @@ from torchvision import models, transforms
 from PIL import Image
 import numpy as np
 from torchvision.models.segmentation import DeepLabV3_ResNet101_Weights
+import argparse
 
-# Paths
-input_folder = 'examples/cup/images'
-output_folder = 'predicted_masks'
-os.makedirs(output_folder, exist_ok=True)
+
+# Argument parsing
+parser = argparse.ArgumentParser(description='DeepLabV3+ Inference Script')
+parser.add_argument('--input_folder', type=str, default='examples/cup/images', help='Path to input images folder')
+parser.add_argument('--output_folder', type=str, default=None, help='(Optional) Path to save predicted masks. If not set, masks will not be saved.')
+args = parser.parse_args()
+
+input_folder = args.input_folder
+output_folder = args.output_folder
+if output_folder:
+    os.makedirs(output_folder, exist_ok=True)
 
 # Device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -40,9 +49,10 @@ for img_name in image_files:
     with torch.no_grad():
         output = model(input_tensor)['out'][0]
     mask = output.argmax(0).byte().cpu().numpy()
-    # Save mask as PNG
-    mask_img = Image.fromarray(mask)
-    mask_img.save(os.path.join(output_folder, f"{os.path.splitext(img_name)[0]}_mask.png"))
+    # Save mask as PNG if output_folder is set
+    if output_folder:
+        mask_img = Image.fromarray(mask)
+        mask_img.save(os.path.join(output_folder, f"{os.path.splitext(img_name)[0]}_mask.png"))
     # Print unique class IDs as caption
     unique_classes = np.unique(mask)
     print(f"{img_name}: Predicted class IDs: {unique_classes}")
