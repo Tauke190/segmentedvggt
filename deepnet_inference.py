@@ -11,7 +11,7 @@ import argparse
 
 # Argument parsing
 parser = argparse.ArgumentParser(description='DeepLabV3+ Inference Script')
-parser.add_argument('--input_folder', type=str, default='examples/cup/images', help='Path to input images folder')
+parser.add_argument('--input_images', type=str, default='examples/cup/images', help='Path to input images folder')
 parser.add_argument('--output_folder', type=str, default=None, help='(Optional) Path to save predicted masks. If not set, masks will not be saved.')
 args = parser.parse_args()
 
