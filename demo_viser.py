@@ -347,6 +347,7 @@ def apply_sky_segmentation(conf: np.ndarray, image_folder: str) -> np.ndarray:
 
 
 parser = argparse.ArgumentParser(description="VGGT demo with viser for 3D visualization")
+
 parser.add_argument(
     "--image_folder", type=str, default="examples/test/images/", help="Path to folder containing images"
 )
@@ -357,6 +358,7 @@ parser.add_argument(
     "--conf_threshold", type=float, default=25.0, help="Initial percentage of low-confidence points to filter out"
 )
 parser.add_argument("--mask_sky", action="store_true", help="Apply sky segmentation to filter out sky points")
+parser.add_argument("--grid_overlay", action="store_true", help="Overlay masks on images and arrange all in a grid.")
 
 
 def mask_to_rgb(mask, cmap):
@@ -421,6 +423,7 @@ def main():
     print(f"Inference time for producing all semantic masks: {inference_time:.3f} seconds")
     # --- End timing inference ---
 
+
     # --- Segmentation mask visualization block (like in evaluate.py) ---
     if "segmentation_logits" in predictions:
         logits = predictions["segmentation_logits"]
@@ -450,7 +453,6 @@ def main():
 
         predictions["blended_colors"] = blended_colors
 
-
         # --- Visualize and save side-by-side comparison for all images ---
         vis_dir = "predicted_visualizations"
         os.makedirs(vis_dir, exist_ok=True)
@@ -476,6 +478,29 @@ def main():
             plt.savefig(vis_path)
             plt.close()
         print(f"Saved side-by-side visualizations to {vis_dir}")
+
+        # --- Overlay masks on images and arrange in grid if requested ---
+        if args.grid_overlay:
+            print("Creating grid overlay of all images with masks...")
+            overlaid_imgs = []
+            for i in range(len(orig_colors)):
+                overlaid = (alpha * mask_colors[i].astype(np.float32) + (1 - alpha) * orig_colors[i].astype(np.float32)).astype(np.uint8)
+                overlaid_imgs.append(overlaid)
+
+            # Determine grid size (try to make it as square as possible)
+            n_imgs = len(overlaid_imgs)
+            grid_cols = int(np.ceil(np.sqrt(n_imgs)))
+            grid_rows = int(np.ceil(n_imgs / grid_cols))
+            h, w, c = overlaid_imgs[0].shape
+            grid_img = np.zeros((grid_rows * h, grid_cols * w, c), dtype=np.uint8)
+            for idx, img in enumerate(overlaid_imgs):
+                row = idx // grid_cols
+                col = idx % grid_cols
+                grid_img[row * h:(row + 1) * h, col * w:(col + 1) * w, :] = img
+
+            grid_path = os.path.join(vis_dir, "grid_overlay.png")
+            Image.fromarray(grid_img).save(grid_path)
+            print(f"Saved grid overlay to {grid_path}")
     # --- End segmentation mask visualization block ---
 
     print("Converting pose encoding to extrinsic and intrinsic matrices...")
