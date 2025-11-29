@@ -32,4 +32,4 @@ def sample_images(src_folder, dst_folder, n, sort_by='name'):
     print(f"Sampled {n} images from {N} and copied to {dst_folder}")
 
 # Example usage:
-sample_images(r'C:\Users\avina\OneDrive\Desktop\cup_001\cup\575_84340_166477\images', r'examples\cup\images', 15, sort_by='name')
+sample_images(r'C:\Users\avina\OneDrive\Desktop\cup_001\cup\575_84340_166477\images', r'examples\cup\images', 60, sort_by='name')
