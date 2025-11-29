@@ -7,7 +7,7 @@ import numpy as np
 from torchvision.models.segmentation import DeepLabV3_ResNet101_Weights
 
 # Paths
-input_folder = 'examples/room/images'
+input_folder = 'examples/cup/images'
 output_folder = 'predicted_masks'
 os.makedirs(output_folder, exist_ok=True)
 
