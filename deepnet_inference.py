@@ -15,7 +15,7 @@ parser.add_argument('--input_images', type=str, default='examples/cup/images', h
 parser.add_argument('--output_folder', type=str, default=None, help='(Optional) Path to save predicted masks. If not set, masks will not be saved.')
 args = parser.parse_args()
 
-input_folder = args.input_folder
+input_folder = args.input_images
 output_folder = args.output_folder
 if output_folder:
     os.makedirs(output_folder, exist_ok=True)
